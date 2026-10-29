@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { findMember, keysOfMember, parseJsonc, spliceMember } from './jsonc.ts';
+import { findMember, indentUnit, memberText, objectKeys, parseJsonc, spliceMember } from './jsonc.ts';
 import { McpError } from './errors.ts';
 
 export const CONFIG_DIR = ['.config', 'opencode'] as const;
@@ -39,13 +39,22 @@ const isPlainObject = (value: unknown): value is Record<string, unknown> =>
   Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 
 const duplicatesOf = (text: string): string[] => {
-  const counts = new Map<string, number>();
+  const duplicates = new Set<string>();
+  const countInto = (keys: string[]): void => {
+    const counts = new Map<string, number>();
+    for (const key of keys) counts.set(key, (counts.get(key) ?? 0) + 1);
+    for (const [key, count] of counts) if (count > 1) duplicates.add(key);
+  };
+  const mcpText = memberText(text, 'mcp');
+  if (!mcpText) return [];
   try {
-    for (const key of keysOfMember(text, 'mcp')) counts.set(key, (counts.get(key) ?? 0) + 1);
+    countInto(objectKeys(mcpText).filter((key) => key !== 'servers' && key !== 'timeout'));
+    const serversText = memberText(mcpText, 'servers');
+    if (serversText) countInto(objectKeys(serversText));
   } catch {
     return [];
   }
-  return [...counts.entries()].flatMap(([key, count]) => (count > 1 ? [key] : []));
+  return [...duplicates];
 };
 
 const loadOne = async (file: string): Promise<LoadedConfig> => {
@@ -119,7 +128,9 @@ export const writeMcpBlock = async (target: string, mcp: Record<string, unknown>
     }
   }
 
-  const next = spliceMember(previous, 'mcp', JSON.stringify(mcp, null, 2));
+  const eol = previous.includes('\r\n') ? '\r\n' : '\n';
+  const serialized = JSON.stringify(mcp, null, indentUnit(previous)).replace(/\n/g, eol);
+  const next = spliceMember(previous, 'mcp', serialized, eol);
   let verified: unknown;
   try {
     verified = parseJsonc(next);

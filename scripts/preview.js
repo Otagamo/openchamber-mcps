@@ -137,6 +137,15 @@ const reset = (nextMode) => {
   }
 };
 
+const formatTimeout = (value) => {
+  if (typeof value === "number") return `${value % 1000 === 0 ? value / 1000 : value}${value % 1000 === 0 ? "s" : "ms"}`;
+  if (value && typeof value === "object") {
+    const parts = Object.entries(value).map(([key, ms]) => `${key} ${ms % 1000 === 0 ? ms / 1000 : ms}${ms % 1000 === 0 ? "s" : "ms"}`);
+    return parts.length > 0 ? parts.join(" · ") : null;
+  }
+  return null;
+};
+
 const view = (id, entry) => {
   const definition = entry.definition;
   const transport = definition.type === "remote" ? "remote" : "local";
@@ -158,13 +167,16 @@ const view = (id, entry) => {
         : "disabled";
   return {
     id,
+    container: entry.container ?? "servers",
     transport: entry.invalid ? "unknown" : transport,
     command,
     url: transport === "remote" ? String(definition.url || "") : null,
     cwd: typeof definition.cwd === "string" ? definition.cwd : null,
     environmentKeys: environment,
     headerKeys: headers,
-    timeout: typeof definition.timeout === "number" ? definition.timeout : null,
+    timeout: formatTimeout(definition.timeout),
+    codemode: definition.codemode === true,
+    protocol: typeof definition.protocol === "string" ? definition.protocol : null,
     oauth: headers.some((key) => /authorization/i.test(key))
       ? "configured"
       : "none",
@@ -173,6 +185,9 @@ const view = (id, entry) => {
     advertised: state === "enabled",
     toolsOff: [],
     paths: entry.paths ?? [primary],
+    targets: (entry.paths ?? [primary]).map(
+      (file) => `${file}#${entry.container ?? "servers"}`,
+    ),
     conflicts: entry.conflicts ?? [],
     warnings: entry.warnings ?? [],
     contentHash: `${id}-hash`,
@@ -191,7 +206,8 @@ const buildData = () => {
       advertised: list.filter((server) => server.advertised).length,
       enabled: list.filter((server) => server.state === "enabled").length,
       disabled: list.filter((server) => server.state === "disabled").length,
-      invalid: list.filter((server) => server.state === "invalid").length,
+      invalid: list.filter((server) => server.state === "invalid" || server.state === "conflict").length,
+      legacy: list.filter((server) => server.container === "legacy").length,
       blockingConflicts: blocking,
       warnings: conflicts.length - blocking,
     },

@@ -1,7 +1,7 @@
 # openchamber-mcps
 
 **MCP Manager** creates, edits, enables, disables, imports and removes OpenCode MCP servers by
-editing the `mcp` block of `~/.config/opencode/opencode.json`. It never touches the rest of
+editing the `mcp.servers` block of `~/.config/opencode/opencode.json`. It never touches the rest of
 your config, never runs an MCP process, and never deletes a definition without saying where the
 backup is.
 
@@ -12,16 +12,22 @@ Current version **0.1.0**.
 
 ## Highlights
 
-- Toggle a server with `"enabled": true` / `false` — the equivalent of the skills rename toggle.
+- Toggle a server with `"disabled": true` / `false` inside `mcp.servers` — the equivalent of the
+  skills rename toggle.
 - Add and edit servers from the panel: `type`, `command`, `cwd`, `environment`, `url`,
-  `headers`, `timeout`, `enabled`, with inline validation before anything is written.
-- Import a manifest by paste, URL or local path (`mcp` block, a single definition with a `name`,
-  or a whole `opencode.json`); every draft is validated first, then saved one by one.
+  `headers`, `enabled`, with inline validation before anything is written. `timeout`,
+  `codemode`, `protocol` and `oauth` are preserved untouched.
+- Reads the current `mcp.servers` schema and still lists deprecated top-level `mcp.<id>` entries,
+  writing each one back in the shape it already has.
+- Import a manifest by paste, URL or local path (`mcp.servers`, a deprecated flat `mcp` block, a
+  single definition with a `name`, or a whole `opencode.json`); every draft is validated first,
+  then saved one by one, always into `mcp.servers`.
 - Conflict checks: unreadable/invalid config (blocking), the same server in both
-  `opencode.json` and `opencode.jsonc` (blocking), the same key twice inside `mcp`, an invalid
-  definition, tools disabled by the `tools` section, plain-`http` remote URLs.
-- Writes preserve comments, key order and every setting outside the `mcp` block; the previous
-  file is kept as `opencode.json.mcp-manager.bak`.
+  `opencode.json` and `opencode.jsonc` or in both containers (blocking), the same key twice
+  inside a container, an invalid definition, tools disabled by the `tools` section,
+  plain-`http` remote URLs.
+- Writes preserve comments, key order, indentation style and line endings outside the `mcp`
+  block; the previous file is kept as `opencode.json.mcp-manager.bak`.
 - Secrets never leave the config: `environment` and `headers` values are blanked on read and
   re-attached from the stored definition when you leave the field empty.
 - Editable groups with local persistence for batch toggling, ported unchanged from the skills
@@ -53,18 +59,31 @@ this directory and allow the local service to run.
 
 ## How it works
 
-An OpenCode MCP server is a key in the `mcp` object:
+An OpenCode MCP server lives under `mcp.servers` (the schema at
+`https://opencode.ai/config.json` is authoritative):
 
 ```json
 {
   "mcp": {
-    "everything": { "type": "local", "command": ["npx", "-y", "@modelcontextprotocol/server-everything"], "enabled": true },
-    "docs": { "type": "remote", "url": "https://example.test/mcp", "enabled": false }
+    "servers": {
+      "everything": {
+        "type": "local",
+        "command": ["npx", "-y", "@modelcontextprotocol/server-everything"],
+        "disabled": false
+      },
+      "docs": {
+        "type": "remote",
+        "url": "https://example.test/mcp",
+        "disabled": true
+      }
+    }
   }
 }
 ```
 
-- **Disable** writes `"enabled": false`; **Enable** writes `"enabled": true`.
+- **Disable** writes `"disabled": true`; **Enable** writes `"disabled": false`.
+- A deprecated flat entry (`mcp.<id>` with `enabled`) is still listed; toggling it writes
+  `enabled` back into that entry instead of silently migrating it to `mcp.servers`.
 - OpenCode starts or skips the server on its next config load. Sessions that already loaded
   tools keep them until they reload — the panel says so in the footer.
 - Everything else in the file (`$schema`, `theme`, providers, `tools`, …) is left byte-identical.
@@ -96,9 +115,10 @@ lifecycle — see [DECISOES.md](DECISOES.md#1-no-process-supervision-startstop-o
 | Kind | Behaviour |
 | --- | --- |
 | Config unreadable or not valid JSON(C) | Blocking; editing, toggling and bulk changes are refused until it is fixed |
-| Same server id in `opencode.json` and `opencode.jsonc` | Blocking; offers **Keep this file** per definition; the losing file is rewritten and backed up |
-| Same key twice inside `mcp` | Warning; OpenCode keeps only the last one |
-| Definition invalid (missing `command`/`url`, bad `type`, bad `timeout`) | Warning; the row shows **Edit definition**, toggling is refused for that server |
+| Same id twice: `opencode.json` + `opencode.jsonc`, or `mcp.servers` + a deprecated entry | Blocking; offers **Keep this file · mcp.servers** / **· legacy entry** per definition; the losing definition is removed and the file is backed up |
+| Same key twice inside one container | Warning; OpenCode keeps only the last one |
+| Definition invalid (missing `command`/`url`, bad `type`, a bare-number `timeout` in `mcp.servers`) | Warning; the row shows **Edit definition**, toggling is refused for that server |
+| Deprecated entry that only carries `enabled` | Warning; it defines no command or url |
 | Tools disabled by the `tools` section | Warning; the server is up but the model cannot call it, so it is not counted as advertised |
 | Remote URL uses plain `http` | Warning |
 
@@ -115,8 +135,13 @@ lifecycle — see [DECISOES.md](DECISOES.md#1-no-process-supervision-startstop-o
 ## Limits
 
 - No background watcher; press **Rescan** after the config changes elsewhere.
-- Comments and manual formatting **inside** the `mcp` block are lost on the first write
-  (the rest of the file, and `opencode.json.mcp-manager.bak`, are not).
+- Inside the `mcp` block the extension re-serialises the servers it writes: comments there are
+  lost, and a hand-written single-line object is reflowed. Indentation style and line endings
+  are read from the file, everything outside `mcp` keeps its bytes, and the previous file is in
+  `opencode.json.mcp-manager.bak`.
+- `timeout`, `codemode`, `protocol` and `oauth` are preserved but not editable from the panel;
+  edit them in the config. `timeout` in `mcp.servers` is an object
+  (`{startup, catalog, execution}`), not a number.
 - A secret cannot be cleared by emptying the field; delete the row instead.
 - No token estimate and no tool list: both need a live MCP connection (see
   [DECISOES.md](DECISOES.md)).
@@ -145,9 +170,9 @@ npm run preview    # synthetic data on 127.0.0.1, never reads your config
 
 | Path | Responsibility |
 | --- | --- |
-| `src/core/jsonc.ts` | JSONC tokeniser, comment stripping, single-member splice |
+| `src/core/jsonc.ts` | JSONC tokeniser, comment stripping, single-member splice, indent/EOL detection |
 | `src/core/config.ts` | Config discovery, atomic writes, backup, round-trip verification |
-| `src/core/servers.ts` | Scan, definition validation, conflicts, toggle/batch/bulk, save/remove/import/resolve |
+| `src/core/servers.ts` | Scan of `mcp.servers` and deprecated entries, validation, conflicts, toggle/batch/bulk, save/remove/import/resolve |
 | `src/core/groups.ts` | Group config read/write with atomic replacement |
 | `src/service/main.ts` | Local HTTP, Bearer check, routing, serialised access |
 | `src/panel/main.ts` | List, switches, editor, import, groups, conflict notices |
@@ -158,9 +183,9 @@ npm run preview    # synthetic data on 127.0.0.1, never reads your config
 
 | | openchamber-skills | openchamber-mcps |
 | --- | --- | --- |
-| Unit | skill entry file | `mcp` key of the OpenCode config |
+| Unit | skill entry file | `mcp.servers` entry of the OpenCode config |
 | Storage | `~/.config/opencode/skills/**` | `~/.config/opencode/opencode.json` |
-| Disable | rename to `.disabled` | `"enabled": false` |
+| Disable | rename to `.disabled` | `"disabled": true` |
 | Create | copy a file into the directory | edit form or manifest import |
 | Delete | none (files are never deleted) | removes the key, keeps a `.bak` |
 | Secrets | none | env/header values blanked on read |

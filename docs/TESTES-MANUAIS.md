@@ -17,17 +17,23 @@ below needs a human, a real OpenChamber, and a real OpenCode config.
 ## Read path
 
 - [ ] With no `opencode.json`, the panel shows the empty state and the config path.
-- [ ] With servers defined, rows match `opencode.json` (id, type, command/url, env/header counts).
-- [ ] A server with `"enabled": false` shows as Disabled and is not counted as advertised.
+- [ ] With servers defined under `mcp.servers`, rows match `opencode.json` (id, type, command/url, env/header counts).
+- [ ] A server with `"disabled": true` shows as Disabled and is not counted as advertised.
+- [ ] A deprecated top-level `mcp.<id>` entry is listed with the `deprecated entry` stat.
+- [ ] `mcp.timeout` (global) is not listed as a server.
 - [ ] A server with `"tools": { "id_*": false }` at the top level is not counted as advertised
       and shows the `tools-off` warning.
+- [ ] A `timeout` object is summarized (`timeout startup 5s · execution 30s`); a bare number is
+      reported as invalid.
 - [ ] **Rescan** picks up an edit made in another editor without restarting OpenChamber.
 
 ## Write path
 
-- [ ] Toggle off → `"enabled": false` appears; the rest of the file is unchanged
+- [ ] Toggle off → `"disabled": true` appears on that one line; the rest of the file is unchanged
       (`git diff` or a manual diff against the `.bak`).
-- [ ] Comments and key order **outside** `mcp` survive a write.
+- [ ] Comments and key order **outside** `mcp` survive a write; line endings and indentation
+      style are unchanged.
+- [ ] Toggling a deprecated entry writes `"enabled"`, not `"disabled"`.
 - [ ] `opencode.json.mcp-manager.bak` contains the exact previous file.
 - [ ] Restart OpenCode: a disabled server is not started, an enabled one is.
 - [ ] File mode after write is unchanged from before (`0600` typical on Linux/macOS).
@@ -48,7 +54,9 @@ below needs a human, a real OpenChamber, and a real OpenCode config.
 
 ## Import
 
-- [ ] Paste an `mcp` block → drafts listed, **Add** writes them.
+- [ ] Paste an `mcp.servers` block → drafts listed, **Add** writes them.
+- [ ] Paste a deprecated flat `mcp` block with `enabled` and a numeric `timeout` → saved as
+      `disabled` and `{ "execution": n }`.
 - [ ] Paste a single definition with `name` → imported without the `name` field.
 - [ ] Paste a whole `opencode.json` → only the `mcp` block is used.
 - [ ] Paste a manifest with one invalid server → whole import refused with the offending id.
@@ -60,9 +68,12 @@ below needs a human, a real OpenChamber, and a real OpenCode config.
 
 ## Conflicts
 
-- [ ] Same id in `opencode.json` and `opencode.jsonc` → blocking, toggling refused with the
-      conflict payload; **Keep this file** removes it from the other file and backs it up.
-- [ ] Same key twice inside `mcp` → duplicate warning naming the key.
+- [ ] Same id in `opencode.json` and `opencode.jsonc`, or in `mcp.servers` and as a deprecated
+      entry → blocking, toggling refused with the conflict payload; **Keep …** removes the
+      losing definition and backs the file up.
+- [ ] Same key twice inside one container → duplicate warning naming the key.
+- [ ] Deprecated stub (`{ "enabled": false }` only) → warning, toggle still works.
+- [ ] `timeout`, `codemode`, `protocol` and `oauth` survive an edit unchanged.
 - [ ] Invalid definition (e.g. `{"type":"local"}`) → row is Invalid, switch disabled,
       **Edit definition** opens the form with what could be read.
 - [ ] Unparsable config → blocking card with the parser message; every write refused;

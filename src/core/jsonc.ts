@@ -190,14 +190,60 @@ export const findMember = (text: string, key: string): MemberScan => {
   return { ...scan, span: null };
 };
 
+/** Indentation step used inside the mcp object, so a rewrite keeps the file's visual shape. */
+export const indentUnit = (text: string): string => {
+  if (text.trim().length === 0) return '  ';
+  const scan = findMember(text, 'mcp');
+  if (!scan.span) return '  ';
+  const lineStart = text.lastIndexOf('\n', scan.span.start) + 1;
+  const memberIndent = /^[ \t]*/.exec(text.slice(lineStart, scan.span.start))?.[0] ?? '';
+  const afterBrace = text.slice(scan.span.start + 1);
+  const newline = afterBrace.indexOf('\n');
+  if (newline < 0) return '  ';
+  const childIndent = /^[ \t]*/.exec(afterBrace.slice(newline + 1))?.[0] ?? '';
+  if (childIndent.length > memberIndent.length) return childIndent.slice(memberIndent.length);
+  return '  ';
+};
+
 /** Replaces (or inserts) one root-level member, leaving the rest of the file untouched. */
-export const spliceMember = (text: string, key: string, valueText: string): string => {
-  const source = text.trim().length === 0 ? '{\n}\n' : text;
+export const spliceMember = (text: string, key: string, valueText: string, eol = '\n'): string => {
+  const source = text.trim().length === 0 ? `{${eol}}${eol}` : text;
   const scan = findMember(source, key);
-  const indented = valueText.replace(/\n/g, '\n  ');
+  const anchor = scan.span ? scan.span.start : scan.close;
+  const lineStart = source.lastIndexOf('\n', anchor) + 1;
+  const memberIndent = /^[ \t]*/.exec(source.slice(lineStart, anchor))?.[0] ?? '  ';
+  const indented = valueText.replace(/\r\n/g, '\n').replace(/\n/g, `${eol}${memberIndent}`);
   if (scan.span) return `${source.slice(0, scan.span.start)}${indented}${source.slice(scan.span.end)}`;
   const separator = scan.hasMembers ? ',' : '';
-  return `${source.slice(0, scan.close)}${separator}\n  ${JSON.stringify(key)}: ${indented}\n${source.slice(scan.close)}`;
+  return `${source.slice(0, scan.close)}${separator}${eol}${memberIndent}${JSON.stringify(key)}: ${indented}${eol}${source.slice(scan.close)}`;
+};
+
+/** Keys of the object the text starts with (comments and trailing commas tolerated). */
+export const objectKeys = (text: string): string[] => {
+  const tokens = significant(tokenize(text));
+  const keys: string[] = [];
+  let depth = 0;
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    if (!token) break;
+    if (token.type === 'punct' && (token.value === '{' || token.value === '[')) {
+      depth += 1;
+      continue;
+    }
+    if (token.type === 'punct' && (token.value === '}' || token.value === ']')) {
+      depth -= 1;
+      if (depth === 0) break;
+      continue;
+    }
+    if (depth === 1 && token.type === 'string' && tokens[index + 1]?.value === ':') keys.push(token.value);
+  }
+  return keys;
+};
+
+/** Text of one root-level member's value, or '' when the member is missing. */
+export const memberText = (text: string, key: string): string => {
+  const scan = findMember(text, key);
+  return scan.span ? text.slice(scan.span.start, scan.span.end) : '';
 };
 
 /** Keys of the root-level object `key`, in file order, so duplicates can be reported. */

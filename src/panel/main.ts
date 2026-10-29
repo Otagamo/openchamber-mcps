@@ -45,7 +45,6 @@ type ServerDraft = {
   environment: string;
   url: string;
   headers: string;
-  timeout: string;
   enabled: boolean;
   maskedEnvironment: string[];
   maskedHeaders: string[];
@@ -90,6 +89,7 @@ const isConflictKind = (value: unknown): value is ConflictKind =>
   value === 'read-error' ||
   value === 'duplicate' ||
   value === 'invalid' ||
+  value === 'stub' ||
   value === 'tools-off' ||
   value === 'insecure-url';
 const isOAuthState = (value: unknown): value is ServerView['oauth'] =>
@@ -119,22 +119,25 @@ const parseConfig = (value: unknown): ConfigView => {
 const parseServer = (value: unknown): ServerView | null => {
   const record = asRecord(value);
   if (!record || typeof record.id !== 'string' || !record.id || !isServerState(record.state)) return null;
-  const timeout = record.timeout;
   return {
     id: record.id,
+    container: record.container === 'legacy' ? 'legacy' : 'servers',
     transport: isTransportKind(record.transport) ? record.transport : 'unknown',
     command: stringArray(record.command),
     url: asNullableString(record.url),
     cwd: asNullableString(record.cwd),
     environmentKeys: stringArray(record.environmentKeys),
     headerKeys: stringArray(record.headerKeys),
-    timeout: typeof timeout === 'number' && Number.isFinite(timeout) ? timeout : null,
+    timeout: asNullableString(record.timeout),
+    codemode: asBool(record.codemode),
+    protocol: asNullableString(record.protocol),
     oauth: isOAuthState(record.oauth) ? record.oauth : 'none',
     enabled: asBool(record.enabled),
     state: record.state,
     advertised: asBool(record.advertised),
     toolsOff: stringArray(record.toolsOff),
     paths: stringArray(record.paths),
+    targets: stringArray(record.targets),
     conflicts: Array.isArray(record.conflicts)
       ? record.conflicts.map(parseConflict).filter((item): item is ConflictView => item !== null)
       : [],
@@ -158,7 +161,8 @@ const parseResponse = (value: unknown): ServersResponse => {
     advertised: servers.filter((server) => server.advertised).length,
     enabled: servers.filter((server) => server.state === 'enabled').length,
     disabled: servers.filter((server) => server.state === 'disabled').length,
-    invalid: servers.filter((server) => server.state === 'invalid').length,
+    invalid: servers.filter((server) => server.state === 'invalid' || server.state === 'conflict').length,
+    legacy: servers.filter((server) => server.container === 'legacy').length,
     blockingConflicts,
     warnings: conflicts.length - blockingConflicts,
   };
@@ -195,6 +199,7 @@ const parseDetail = (value: unknown): DetailResponse => {
   if (!record || !definition) throw new ServiceError('The service returned an invalid server definition.', 'parse', []);
   return {
     id: asString(record.id),
+    container: record.container === 'legacy' ? 'legacy' : 'servers',
     definition,
     paths: stringArray(record.paths),
     maskedPaths: stringArray(record.maskedPaths),
@@ -328,7 +333,7 @@ footer.append(
   el(
     'p',
     '',
-    'Manages the mcp block of ~/.config/opencode/opencode.json (and opencode.jsonc when present). Writes preserve comments and the rest of the file; every write keeps the previous content in opencode.json.mcp-manager.bak.',
+    'Manages the mcp.servers block of ~/.config/opencode/opencode.json (and opencode.jsonc when present). Writes preserve comments and the rest of the file; every write keeps the previous content in opencode.json.mcp-manager.bak.',
   ),
   el(
     'p',
@@ -417,7 +422,7 @@ const conflictTitle = (kind: ConflictKind): string => {
     case 'both':
       return 'Defined in more than one config file';
     case 'duplicate':
-      return 'Duplicate entry in the mcp block';
+      return 'Duplicate entry inside mcp.servers';
     case 'invalid':
       return 'Definition cannot be read';
     case 'read-error':
@@ -473,14 +478,25 @@ const conflictItem = (conflict: ConflictView): HTMLElement => {
   }
   item.append(copy);
 
-  if (conflict.kind === 'both' && conflict.paths.length >= 2) {
-    const actions = el('div', 'mc-conflict-actions');
-    for (const file of conflict.paths) {
-      actions.append(
-        actionButton(`Keep ${basename(file)}`, () => void resolveConflict(conflict, file), false, configBlocked()),
-      );
+  if (conflict.kind === 'both') {
+    const server = data?.servers.find((item) => item.id === conflict.serverId) ?? null;
+    const targets = server?.targets ?? [];
+    if (targets.length >= 2) {
+      const actions = el('div', 'mc-conflict-actions');
+      for (const target of targets) {
+        const [file] = target.split('#');
+        const container = target.endsWith('#legacy') ? 'legacy entry' : 'mcp.servers';
+        actions.append(
+          actionButton(
+            `Keep ${basename(file ?? target)} · ${container}`,
+            () => void resolveConflict(conflict, target),
+            false,
+            configBlocked(),
+          ),
+        );
+      }
+      item.append(actions);
     }
-    item.append(actions);
   }
   return item;
 };
@@ -609,18 +625,20 @@ const renderNotice = (): void => {
 const renderSummary = (): void => {
   if (!data) {
     summary.textContent = loading ? 'Reading servers…' : 'Servers not loaded yet.';
-    summarySecondary.textContent = 'MCP servers live in the mcp block of opencode.json.';
+    summarySecondary.textContent = 'MCP servers live in the mcp.servers block of opencode.json.';
     return;
   }
   summary.textContent = `${data.summary.advertised} of ${data.summary.total} visible to the model · ${data.summary.enabled} enabled`;
   const blocking = data.summary.blockingConflicts;
   const warnings = data.summary.warnings;
-  summarySecondary.textContent = [
+  const parts = [
     `${data.summary.disabled} disabled`,
     `${data.summary.invalid} invalid`,
     blocking > 0 ? `${blocking} blocking conflict${blocking === 1 ? '' : 's'}` : 'No blocking conflicts',
     `${warnings} warning${warnings === 1 ? '' : 's'}`,
-  ].join(' · ');
+  ];
+  if (data.summary.legacy > 0) parts.push(`${data.summary.legacy} deprecated entries`);
+  summarySecondary.textContent = parts.join(' · ');
 };
 
 const groupServerIds = (group: ServerGroup): string[] =>
@@ -1177,7 +1195,6 @@ const headerLines = (value: unknown): { lines: string[]; masked: string[] } => {
 const draftFromDefinition = (id: string, definition: Record<string, unknown>): ServerDraft => {
   const environment = pairLines(definition.environment);
   const headers = headerLines(definition.headers);
-  const timeout = definition.timeout;
   return {
     id,
     base: definition,
@@ -1188,21 +1205,19 @@ const draftFromDefinition = (id: string, definition: Record<string, unknown>): S
     environment: environment.lines.join('\n'),
     url: asString(definition.url),
     headers: headers.lines.join('\n'),
-    timeout: typeof timeout === 'number' && Number.isFinite(timeout) ? String(timeout) : '',
-    enabled: definition.enabled !== false,
+    enabled: definition.disabled !== true && definition.enabled !== false,
     maskedEnvironment: environment.masked,
     maskedHeaders: headers.masked,
   };
 };
 
 const buildDefinition = (draft: ServerDraft): { definition: Record<string, unknown>; error: string | null } => {
-  // Everything the form does not edit (oauth, future keys) rides along in base.
+  // Everything the form does not edit (timeout, codemode, protocol, oauth, future keys) rides along in base.
   const definition: Record<string, unknown> = { ...draft.base };
-  for (const key of ['type', 'command', 'cwd', 'environment', 'url', 'headers', 'timeout', 'enabled']) {
+  for (const key of ['type', 'command', 'cwd', 'environment', 'url', 'headers', 'enabled', 'disabled']) {
     delete definition[key];
   }
   definition.type = draft.transport;
-  definition.enabled = draft.enabled;
   if (draft.transport === 'local') {
     const parts = splitCommand(draft.command);
     if (parts.error) return { definition, error: parts.error };
@@ -1220,14 +1235,6 @@ const buildDefinition = (draft: ServerDraft): { definition: Record<string, unkno
     const headers = parsePairs(draft.headers, ':', 'Name: value');
     if (headers.error) return { definition, error: `Headers: ${headers.error}` };
     if (Object.keys(headers.values).length > 0) definition.headers = headers.values;
-  }
-  const timeout = draft.timeout.trim();
-  if (timeout) {
-    const milliseconds = Number(timeout);
-    if (!Number.isInteger(milliseconds) || milliseconds <= 0) {
-      return { definition, error: 'Timeout must be a whole number of milliseconds.' };
-    }
-    definition.timeout = milliseconds;
   }
   return { definition, error: null };
 };
@@ -1258,7 +1265,6 @@ const openNewServer = (): void => {
     environment: '',
     url: '',
     headers: '',
-    timeout: '',
     enabled: true,
     maskedEnvironment: [],
     maskedHeaders: [],
@@ -1392,7 +1398,7 @@ const renderServerEditor = (): void => {
   }
 
   card.append(
-    field('ID', idInput, 'The key inside the mcp block of opencode.json.'),
+    field('ID', idInput, 'The key inside mcp.servers of opencode.json.'),
     field('Type', typeRow),
   );
 
@@ -1483,21 +1489,6 @@ const renderServerEditor = (): void => {
     );
   }
 
-  const timeout = el('input', 'mc-input');
-  timeout.type = 'text';
-  timeout.inputMode = 'numeric';
-  timeout.value = draft.timeout;
-  timeout.placeholder = 'e.g. 10000';
-  timeout.autocomplete = 'off';
-  timeout.dataset.field = 'timeout';
-  timeout.disabled = Boolean(busy);
-  timeout.addEventListener('input', () => {
-    if (!serverDraft) return;
-    serverDraft.timeout = timeout.value;
-    serverDraftError = null;
-  });
-  card.append(field('Timeout (ms)', timeout, 'Milliseconds to wait for the server to start. Leave empty for the default.'));
-
   const enabledRow = el('label', 'mc-check');
   const enabledInput = el('input');
   enabledInput.type = 'checkbox';
@@ -1529,7 +1520,7 @@ const renderServerEditor = (): void => {
     el(
       'p',
       'mc-editor-hint',
-      'Only the mcp entry is written. Secrets already in opencode.json are kept when the field is left blank; a new value replaces them.',
+      'Only this server definition is written. Secrets already in opencode.json are kept when the field is left blank; a new value replaces them.',
     ),
   );
   serverEditor.append(card);
@@ -1657,7 +1648,7 @@ const renderInstall = (): void => {
   });
 
   inner.append(
-    field('Paste a manifest', paste, 'Accepts an mcp block, a single server definition, or a whole opencode.json.'),
+    field('Paste a manifest', paste, 'Accepts an mcp block (mcp.servers or deprecated flat entries), a single server definition, or a whole opencode.json.'),
     field('URL', url, null),
     field('Local file or folder', path, null),
   );
@@ -1722,7 +1713,7 @@ const serverAction = (server: ServerView): HTMLElement => {
   const blocked = configBlocked();
 
   if (server.state === 'conflict') {
-    note.textContent = `Defined in ${server.paths.length || 2} config files`;
+    note.textContent = `Defined in ${server.targets.length || 2} places`;
     const button = el('button', 'mc-inline-button', 'Resolve');
     button.type = 'button';
     button.disabled = Boolean(busy) || blocked;
@@ -1787,9 +1778,12 @@ const renderServer = (server: ServerView): HTMLElement => {
   );
 
   const meta = el('div', 'mc-meta');
+  if (server.container === 'legacy') meta.append(el('span', 'mc-stat', 'deprecated entry'));
   if (server.environmentKeys.length > 0) meta.append(el('span', 'mc-stat', `env ${server.environmentKeys.length}`));
   if (server.headerKeys.length > 0) meta.append(el('span', 'mc-stat', `headers ${server.headerKeys.length}`));
-  if (server.timeout !== null) meta.append(el('span', 'mc-stat', `timeout ${server.timeout} ms`));
+  if (server.timeout !== null) meta.append(el('span', 'mc-stat', `timeout ${server.timeout}`));
+  if (server.codemode) meta.append(el('span', 'mc-stat', 'codemode'));
+  if (server.protocol !== null) meta.append(el('span', 'mc-stat', `protocol ${server.protocol}`));
 
   const target = server.transport === 'remote'
     ? server.url ?? 'No URL'
@@ -1988,19 +1982,19 @@ const removeServer = async (id: string): Promise<void> => {
   render();
 };
 
-const resolveConflict = async (conflict: ConflictView, keep: string): Promise<void> => {
+const resolveConflict = async (conflict: ConflictView, keepTarget: string): Promise<void> => {
   if (busy) return;
-  if (!conflict.serverId || !keep) return;
+  if (!conflict.serverId || !keepTarget) return;
   busy = `resolve:${conflict.serverId}`;
   notice = null;
   render();
   try {
-    const raw = await request('POST', '/servers/resolve', { id: conflict.serverId, keep });
+    const raw = await request('POST', '/servers/resolve', { id: conflict.serverId, keep: keepTarget });
     const record = asRecord(raw);
     const backupPath = typeof record?.backupPath === 'string' ? record.backupPath : null;
     data = parseResponse(raw);
     notice = {
-      text: `Kept the definition in ${keep}${backupPath ? `; previous content copied to ${backupPath}` : ''}.`,
+      text: `Kept the definition in ${keepTarget.split('#')[0] ?? keepTarget}${backupPath ? `; previous content copied to ${backupPath}` : ''}.`,
       tone: 'success',
     };
     void host.toast({ kind: 'success', message: 'Config conflict resolved' }).catch(() => undefined);

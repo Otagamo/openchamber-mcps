@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { findMember, keysOfMember, parseJsonc, spliceMember, stripComments } from '../src/core/jsonc.ts';
+import { findMember, indentUnit, keysOfMember, parseJsonc, spliceMember, stripComments } from '../src/core/jsonc.ts';
 
 test('stripComments blanks comments but keeps line count', () => {
   const source = '{\n  // note\n  "a": 1, /* inline */\n  "b": [1, 2,],\n}\n';
@@ -50,4 +50,18 @@ test('findMember reports the value span of a nested member', () => {
 test('keysOfMember lists duplicate keys in file order', () => {
   const source = '{\n  "mcp": {\n    "dup": {"type": "local", "command": ["a"]},\n    "dup": {"type": "remote", "url": "https://x.test"}\n  }\n}';
   assert.deepEqual(keysOfMember(source, 'mcp'), ['dup', 'dup']);
+});
+
+test('spliceMember keeps CRLF line endings', () => {
+  const source = '{\r\n  "theme": "dark",\r\n  "mcp": {\r\n    "servers": {}\r\n  }\r\n}\r\n';
+  const next = spliceMember(source, 'mcp', '{\r\n  "servers": {}\r\n}', '\r\n');
+  assert.ok(!next.includes('\r\r'));
+  assert.equal((next.match(/\r\n/g) ?? []).length, (next.match(/\n/g) ?? []).length);
+  assert.deepEqual(parseJsonc(next), { theme: 'dark', mcp: { servers: {} } });
+});
+
+test('indentUnit follows the file, not a fixed two spaces', () => {
+  assert.equal(indentUnit('{\n    "mcp": {\n        "servers": {}\n    }\n}\n'), '    ');
+  assert.equal(indentUnit('{\n  "mcp": {\n    "servers": {}\n  }\n}\n'), '  ');
+  assert.equal(indentUnit(''), '  ');
 });

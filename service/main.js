@@ -308,36 +308,53 @@ var findMember = (text, key) => {
   }
   return { ...scan, span: null };
 };
-var spliceMember = (text, key, valueText) => {
-  const source = text.trim().length === 0 ? "{\n}\n" : text;
+var indentUnit = (text) => {
+  if (text.trim().length === 0) return "  ";
+  const scan = findMember(text, "mcp");
+  if (!scan.span) return "  ";
+  const lineStart = text.lastIndexOf("\n", scan.span.start) + 1;
+  const memberIndent = /^[ \t]*/.exec(text.slice(lineStart, scan.span.start))?.[0] ?? "";
+  const afterBrace = text.slice(scan.span.start + 1);
+  const newline = afterBrace.indexOf("\n");
+  if (newline < 0) return "  ";
+  const childIndent = /^[ \t]*/.exec(afterBrace.slice(newline + 1))?.[0] ?? "";
+  if (childIndent.length > memberIndent.length) return childIndent.slice(memberIndent.length);
+  return "  ";
+};
+var spliceMember = (text, key, valueText, eol = "\n") => {
+  const source = text.trim().length === 0 ? `{${eol}}${eol}` : text;
   const scan = findMember(source, key);
-  const indented = valueText.replace(/\n/g, "\n  ");
+  const anchor = scan.span ? scan.span.start : scan.close;
+  const lineStart = source.lastIndexOf("\n", anchor) + 1;
+  const memberIndent = /^[ \t]*/.exec(source.slice(lineStart, anchor))?.[0] ?? "  ";
+  const indented = valueText.replace(/\r\n/g, "\n").replace(/\n/g, `${eol}${memberIndent}`);
   if (scan.span) return `${source.slice(0, scan.span.start)}${indented}${source.slice(scan.span.end)}`;
   const separator = scan.hasMembers ? "," : "";
-  return `${source.slice(0, scan.close)}${separator}
-  ${JSON.stringify(key)}: ${indented}
-${source.slice(scan.close)}`;
+  return `${source.slice(0, scan.close)}${separator}${eol}${memberIndent}${JSON.stringify(key)}: ${indented}${eol}${source.slice(scan.close)}`;
 };
-var keysOfMember = (text, key) => {
-  const scan = findMember(text, key);
-  if (!scan.span) return [];
+var objectKeys = (text) => {
   const tokens = significant(tokenize(text));
   const keys = [];
   let depth = 0;
   for (let index = 0; index < tokens.length; index += 1) {
     const token2 = tokens[index];
-    if (!token2 || token2.start < scan.span.start || token2.end > scan.span.end) continue;
+    if (!token2) break;
     if (token2.type === "punct" && (token2.value === "{" || token2.value === "[")) {
       depth += 1;
       continue;
     }
     if (token2.type === "punct" && (token2.value === "}" || token2.value === "]")) {
       depth -= 1;
+      if (depth === 0) break;
       continue;
     }
     if (depth === 1 && token2.type === "string" && tokens[index + 1]?.value === ":") keys.push(token2.value);
   }
   return keys;
+};
+var memberText = (text, key) => {
+  const scan = findMember(text, key);
+  return scan.span ? text.slice(scan.span.start, scan.span.end) : "";
 };
 
 // src/core/config.ts
@@ -357,13 +374,22 @@ var configPaths = (home) => [PRIMARY_NAME, ALTERNATE_NAME].map((name) => path2.j
 var primaryConfigPath = (home) => configPaths(home)[0] ?? "";
 var isPlainObject = (value) => Boolean(value) && typeof value === "object" && !Array.isArray(value);
 var duplicatesOf = (text) => {
-  const counts = /* @__PURE__ */ new Map();
+  const duplicates = /* @__PURE__ */ new Set();
+  const countInto = (keys) => {
+    const counts = /* @__PURE__ */ new Map();
+    for (const key of keys) counts.set(key, (counts.get(key) ?? 0) + 1);
+    for (const [key, count] of counts) if (count > 1) duplicates.add(key);
+  };
+  const mcpText = memberText(text, "mcp");
+  if (!mcpText) return [];
   try {
-    for (const key of keysOfMember(text, "mcp")) counts.set(key, (counts.get(key) ?? 0) + 1);
+    countInto(objectKeys(mcpText).filter((key) => key !== "servers" && key !== "timeout"));
+    const serversText = memberText(mcpText, "servers");
+    if (serversText) countInto(objectKeys(serversText));
   } catch {
     return [];
   }
-  return [...counts.entries()].flatMap(([key, count]) => count > 1 ? [key] : []);
+  return [...duplicates];
 };
 var loadOne = async (file) => {
   const name = path2.basename(file);
@@ -428,7 +454,9 @@ var writeMcpBlock = async (target, mcp) => {
       );
     }
   }
-  const next = spliceMember(previous, "mcp", JSON.stringify(mcp, null, 2));
+  const eol = previous.includes("\r\n") ? "\r\n" : "\n";
+  const serialized = JSON.stringify(mcp, null, indentUnit(previous)).replace(/\n/g, eol);
+  const next = spliceMember(previous, "mcp", serialized, eol);
   let verified;
   try {
     verified = parseJsonc(next);
@@ -469,10 +497,13 @@ var ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 var MAX_COMMAND_ITEMS = 64;
 var MAX_STRING = 4096;
 var MAX_ENTRIES = 500;
-var MAX_TIMEOUT = 6e5;
+var MAX_TIMEOUT = 36e5;
 var MAX_IMPORT_BYTES = 512 * 1024;
 var IMPORT_TIMEOUT_MS = 15e3;
+var RESERVED_KEYS = /* @__PURE__ */ new Set(["servers", "timeout"]);
+var TIMEOUT_KEYS = ["startup", "catalog", "execution"];
 var isPlainObject2 = (value) => Boolean(value) && typeof value === "object" && !Array.isArray(value);
+var looksLikeDefinition = (value) => isPlainObject2(value) && (value.type !== void 0 || value.command !== void 0 || value.url !== void 0);
 var stringList = (value, label, errors) => {
   if (!Array.isArray(value)) {
     errors.push(`${label} must be an array of strings`);
@@ -496,7 +527,7 @@ var stringList = (value, label, errors) => {
   }
   return out;
 };
-var objectKeys = (value, label, errors, warnings) => {
+var objectKeys2 = (value, label, errors, warnings) => {
   if (value === void 0) return [];
   if (!isPlainObject2(value)) {
     errors.push(`${label} must be an object`);
@@ -513,7 +544,53 @@ var objectKeys = (value, label, errors, warnings) => {
   }
   return keys;
 };
-var analyzeDefinition = (value) => {
+var formatMs = (ms) => ms % 1e3 === 0 ? `${ms / 1e3}s` : `${ms}ms`;
+var positiveInt = (value) => typeof value === "number" && Number.isInteger(value) && value > 0 && value <= MAX_TIMEOUT ? value : null;
+var timeoutInfo = (value, container, errors, warnings) => {
+  if (value === void 0) return null;
+  if (container === "legacy") {
+    if (isPlainObject2(value)) {
+      errors.push("timeout must be a positive whole number of milliseconds in a deprecated entry");
+      return null;
+    }
+    const ms = positiveInt(value);
+    if (ms === null) {
+      errors.push(`timeout must be a positive whole number of milliseconds up to ${MAX_TIMEOUT}`);
+      return null;
+    }
+    return formatMs(ms);
+  }
+  if (typeof value === "number") {
+    errors.push("timeout must be an object with startup, catalog or execution (milliseconds); a bare number is the deprecated shape");
+    return null;
+  }
+  if (!isPlainObject2(value)) {
+    errors.push("timeout must be an object with startup, catalog or execution");
+    return null;
+  }
+  const parts = [];
+  for (const [key, raw] of Object.entries(value)) {
+    if (!TIMEOUT_KEYS.includes(key)) {
+      warnings.push(`timeout.${key} is not a recognized timeout field and is ignored`);
+      continue;
+    }
+    const ms = positiveInt(raw);
+    if (ms === null) errors.push(`timeout.${key} must be a positive whole number of milliseconds`);
+    else parts.push(`${key} ${formatMs(ms)}`);
+  }
+  return parts.length > 0 ? parts.join(" \xB7 ") : null;
+};
+var flagInfo = (value, container, errors, warnings) => {
+  if (container === "servers") {
+    if (value.enabled !== void 0) warnings.push('"enabled" is the deprecated flag; use "disabled" inside mcp.servers');
+    if (value.disabled !== void 0 && typeof value.disabled !== "boolean") errors.push("disabled must be a boolean");
+    return value.disabled !== true;
+  }
+  if (value.disabled !== void 0) warnings.push('"disabled" is ignored in a deprecated entry; use "enabled"');
+  if (value.enabled !== void 0 && typeof value.enabled !== "boolean") errors.push("enabled must be a boolean");
+  return value.enabled !== false;
+};
+var analyzeDefinition = (value, container = "servers") => {
   const errors = [];
   const warnings = [];
   const info = {
@@ -524,7 +601,10 @@ var analyzeDefinition = (value) => {
     environmentKeys: [],
     headerKeys: [],
     timeout: null,
+    codemode: false,
+    protocol: null,
     oauth: "none",
+    enabled: true,
     errors,
     warnings
   };
@@ -532,19 +612,44 @@ var analyzeDefinition = (value) => {
     errors.push("Definition must be a JSON object");
     return info;
   }
-  const declaredType = value.type;
-  if (declaredType !== void 0 && declaredType !== "local" && declaredType !== "remote") {
-    errors.push('type must be "local" or "remote"');
+  info.enabled = flagInfo(value, container, errors, warnings);
+  info.timeout = timeoutInfo(value.timeout, container, errors, warnings);
+  info.environmentKeys = objectKeys2(value.environment, "environment", errors, warnings);
+  info.headerKeys = objectKeys2(value.headers, "headers", errors, warnings);
+  if (container === "servers") {
+    if (value.codemode !== void 0) {
+      if (typeof value.codemode !== "boolean") errors.push("codemode must be a boolean");
+      else info.codemode = value.codemode;
+    }
+    if (value.protocol !== void 0) {
+      if (value.protocol !== "legacy" && value.protocol !== "auto" && value.protocol !== "2026-07-28") {
+        errors.push('protocol must be "legacy", "auto" or "2026-07-28"');
+      } else {
+        info.protocol = value.protocol;
+      }
+    }
+  } else if (value.codemode !== void 0 || value.protocol !== void 0) {
+    warnings.push("codemode and protocol are only read from mcp.servers; move this server there to use them");
   }
-  const hasCommand = value.command !== void 0;
-  const hasUrl = value.url !== void 0;
-  const type = declaredType === "local" || declaredType === "remote" ? declaredType : hasCommand && !hasUrl ? "local" : hasUrl && !hasCommand ? "remote" : null;
-  if (!type) {
-    if (declaredType === void 0) errors.push("type is required, or a command (local) or url (remote) must be given");
+  if (value.oauth === false) info.oauth = "disabled";
+  else if (isPlainObject2(value.oauth)) info.oauth = "configured";
+  else if (value.oauth === void 0) info.oauth = "none";
+  else errors.push("oauth must be an object or false");
+  const declaredType = value.type;
+  if (declaredType === void 0) {
+    if (container === "legacy" && value.enabled !== void 0 && !looksLikeDefinition(value)) {
+      warnings.push('Definition only sets "enabled"; add type and command or url');
+      return info;
+    }
+    errors.push('type is required ("local" or "remote")');
     return info;
   }
-  info.transport = type;
-  if (type === "local") {
+  if (declaredType !== "local" && declaredType !== "remote") {
+    errors.push('type must be "local" or "remote"');
+    return info;
+  }
+  info.transport = declaredType;
+  if (declaredType === "local") {
     info.command = stringList(value.command, "command", errors);
     if (value.cwd !== void 0) {
       if (typeof value.cwd !== "string" || value.cwd.length === 0 || value.cwd.length > MAX_STRING) {
@@ -554,6 +659,7 @@ var analyzeDefinition = (value) => {
       }
     }
     if (value.url !== void 0) warnings.push("url is ignored for a local server");
+    if (value.headers !== void 0) warnings.push("headers are ignored for a local server");
   } else {
     info.url = typeof value.url === "string" ? value.url : null;
     if (!info.url) {
@@ -574,26 +680,17 @@ var analyzeDefinition = (value) => {
       }
     }
     if (value.command !== void 0) warnings.push("command is ignored for a remote server");
+    if (value.environment !== void 0) warnings.push("environment is ignored for a remote server");
   }
-  info.environmentKeys = objectKeys(value.environment, "environment", errors, warnings);
-  info.headerKeys = objectKeys(value.headers, "headers", errors, warnings);
-  if (value.timeout !== void 0) {
-    if (typeof value.timeout !== "number" || !Number.isFinite(value.timeout) || value.timeout <= 0) {
-      errors.push("timeout must be a positive number of milliseconds");
-    } else if (value.timeout > MAX_TIMEOUT) {
-      errors.push(`timeout cannot exceed ${MAX_TIMEOUT} ms`);
-    } else {
-      info.timeout = value.timeout;
-    }
-  }
-  if (value.enabled !== void 0 && typeof value.enabled !== "boolean") {
-    errors.push("enabled must be a boolean");
-  }
-  if (value.oauth === false) info.oauth = "disabled";
-  else if (isPlainObject2(value.oauth)) info.oauth = "configured";
-  else if (value.oauth === void 0) info.oauth = type === "remote" ? "auto" : "none";
-  else if (value.oauth !== true) errors.push("oauth must be an object or false");
   return info;
+};
+var targetOf = (entry) => `${entry.path}#${entry.container}`;
+var splitTarget = (target) => {
+  const index = target.lastIndexOf("#");
+  if (index <= 0) return null;
+  const container = target.slice(index + 1);
+  if (container !== "servers" && container !== "legacy") return null;
+  return { path: target.slice(0, index), container };
 };
 var toolsDisabledPatterns = (config) => {
   const tools = config.data?.tools;
@@ -607,35 +704,40 @@ var patternCovers = (pattern, id) => {
   return base === id || base.startsWith(`${id}_`) || base.startsWith(`${id}.`);
 };
 var hashOf = (definition) => definition ? createHash("sha256").update(JSON.stringify(definition)).digest("hex") : "";
+var pushEntry = (entries, config, patterns, id, value, container) => {
+  const definition = isPlainObject2(value) ? value : null;
+  const info = analyzeDefinition(value, container);
+  const off = patterns.filter((pattern) => patternCovers(pattern, id));
+  entries.push({
+    id,
+    path: config.path,
+    container,
+    definition,
+    info,
+    hash: hashOf(definition),
+    toolsOff: off
+  });
+};
 var collect = (configs) => {
   const entries = [];
   const configConflicts = [];
   for (const config of configs) {
-    if (config.error) {
+    if (config.error || config.parseError) {
       configConflicts.push({
         kind: "read-error",
         serverId: "",
-        message: `Cannot read ${config.path}: ${config.error}`,
+        message: config.error ? `Cannot read ${config.path}: ${config.error}` : `${config.parseError} (${config.path})`,
         paths: [config.path],
         blocking: true
       });
       continue;
     }
-    if (config.parseError) {
-      configConflicts.push({
-        kind: "read-error",
-        serverId: "",
-        message: `${config.parseError} (${config.path})`,
-        paths: [config.path],
-        blocking: true
-      });
-      continue;
-    }
-    if (config.data && config.data.mcp !== void 0 && !isPlainObject2(config.data.mcp)) {
+    if (!config.data) continue;
+    if (config.data.mcp !== void 0 && !isPlainObject2(config.data.mcp)) {
       configConflicts.push({
         kind: "invalid",
         serverId: "",
-        message: `"mcp" in ${config.name} must be an object of servers; the block is ignored`,
+        message: `"mcp" in ${config.name} must be an object; the block is ignored`,
         paths: [config.path],
         blocking: true
       });
@@ -645,31 +747,33 @@ var collect = (configs) => {
       configConflicts.push({
         kind: "duplicate",
         serverId: key,
-        message: `"${key}" is defined more than once in ${config.name}; OpenCode keeps only the last one`,
+        message: `"${key}" is defined more than once in the mcp block of ${config.name}; OpenCode keeps only the last one`,
         paths: [config.path],
         blocking: false
       });
     }
-    if (!config.mcp) continue;
+    const mcp = config.mcp;
+    if (!mcp) continue;
     const patterns = toolsDisabledPatterns(config);
-    for (const [id, value] of Object.entries(config.mcp)) {
-      const definition = isPlainObject2(value) ? value : null;
-      const info = analyzeDefinition(value);
-      const off = patterns.filter((pattern) => patternCovers(pattern, id));
-      if (off.length > 0) info.warnings.push(`tools disabled by ${off.map((item) => `"${item}"`).join(", ")}`);
-      entries.push({
-        id,
-        path: config.path,
-        definition,
-        info,
-        enabled: definition?.enabled !== false,
-        hash: hashOf(definition),
-        toolsOff: off
+    if (mcp.servers !== void 0 && !isPlainObject2(mcp.servers)) {
+      configConflicts.push({
+        kind: "invalid",
+        serverId: "",
+        message: `"mcp.servers" in ${config.name} must be an object of servers; no server in that file is listed`,
+        paths: [config.path],
+        blocking: true
       });
+    } else if (isPlainObject2(mcp.servers)) {
+      for (const [id, value] of Object.entries(mcp.servers)) pushEntry(entries, config, patterns, id, value, "servers");
+    }
+    for (const [id, value] of Object.entries(mcp)) {
+      if (RESERVED_KEYS.has(id) && (id === "servers" || !looksLikeDefinition(value))) continue;
+      pushEntry(entries, config, patterns, id, value, "legacy");
     }
   }
   return { entries, configConflicts };
 };
+var containerLabel = (container) => container === "servers" ? "mcp.servers" : "a deprecated top-level entry";
 var buildResponse = (configs) => {
   const { entries, configConflicts } = collect(configs);
   const groups = /* @__PURE__ */ new Map();
@@ -680,24 +784,26 @@ var buildResponse = (configs) => {
   }
   const servers = [];
   for (const [id, group] of groups) {
-    group.sort((left, right) => left.path.localeCompare(right.path));
+    group.sort((left, right) => {
+      if (left.container !== right.container) return left.container === "servers" ? 1 : -1;
+      return left.path.localeCompare(right.path);
+    });
     const winner = group.at(-1) ?? group[0];
     if (!winner) continue;
-    const paths = Array.from(new Set(group.map((entry) => entry.path)));
-    const both = paths.length > 1;
+    const duplicate = group.length > 1;
     const conflicts2 = [];
     const push = (conflict) => {
-      const duplicate = conflicts2.some(
+      const seen = conflicts2.some(
         (item) => item.kind === conflict.kind && item.message === conflict.message && item.paths.join() === conflict.paths.join()
       );
-      if (!duplicate) conflicts2.push(conflict);
+      if (!seen) conflicts2.push(conflict);
     };
-    if (both) {
+    if (duplicate) {
       push({
         kind: "both",
         serverId: id,
-        message: `"${id}" is defined in ${paths.length} config files; OpenCode loads only one of them`,
-        paths,
+        message: `"${id}" is defined in ${group.length} places: ${group.map((entry) => `${path3.basename(entry.path)} (${containerLabel(entry.container)})`).join(", ")}; OpenCode loads only one`,
+        paths: Array.from(new Set(group.map((entry) => entry.path))),
         blocking: true
       });
     }
@@ -710,7 +816,16 @@ var buildResponse = (configs) => {
         blocking: false
       });
     }
-    if (winner.toolsOff) {
+    if (winner.info.warnings.some((warning) => warning.startsWith("Definition only sets"))) {
+      push({
+        kind: "stub",
+        serverId: id,
+        message: `${containerLabel(winner.container)} for "${id}" only sets the on/off flag; it defines no command or url`,
+        paths: [winner.path],
+        blocking: false
+      });
+    }
+    if (winner.toolsOff.length > 0) {
       push({
         kind: "tools-off",
         serverId: id,
@@ -719,10 +834,12 @@ var buildResponse = (configs) => {
         blocking: false
       });
     }
-    const state = both ? "conflict" : winner.info.errors.length > 0 ? "invalid" : winner.enabled ? "enabled" : "disabled";
+    const invalid = winner.info.errors.length > 0;
+    const state = duplicate ? "conflict" : invalid ? "invalid" : winner.info.enabled ? "enabled" : "disabled";
     const advertised = state === "enabled" && winner.toolsOff.length === 0;
     servers.push({
       id,
+      container: winner.container,
       transport: winner.info.transport,
       command: winner.info.command,
       url: winner.info.url,
@@ -730,14 +847,19 @@ var buildResponse = (configs) => {
       environmentKeys: winner.info.environmentKeys,
       headerKeys: winner.info.headerKeys,
       timeout: winner.info.timeout,
+      codemode: winner.info.codemode,
+      protocol: winner.info.protocol,
       oauth: winner.info.oauth,
-      enabled: winner.enabled,
+      enabled: winner.info.enabled,
       state,
       advertised,
       toolsOff: winner.toolsOff,
-      paths,
+      paths: Array.from(new Set(group.map((entry) => entry.path))),
+      targets: group.map((entry) => targetOf(entry)),
       conflicts: conflicts2,
-      warnings: Array.from(/* @__PURE__ */ new Set([...winner.info.warnings, ...conflicts2.filter((item) => !item.blocking).map((item) => item.message)])),
+      warnings: Array.from(
+        /* @__PURE__ */ new Set([...winner.info.warnings, ...conflicts2.filter((item) => !item.blocking).map((item) => item.message)])
+      ),
       contentHash: winner.hash
     });
   }
@@ -747,9 +869,10 @@ var buildResponse = (configs) => {
   const summary = {
     total: servers.length,
     advertised: servers.filter((server2) => server2.advertised).length,
-    enabled: servers.filter((server2) => server2.enabled && server2.state !== "conflict").length,
+    enabled: servers.filter((server2) => server2.state === "enabled").length,
     disabled: servers.filter((server2) => server2.state === "disabled").length,
     invalid: servers.filter((server2) => server2.state === "invalid" || server2.state === "conflict").length,
+    legacy: servers.filter((server2) => server2.container === "legacy").length,
     blockingConflicts: blocking.length,
     warnings: conflicts.length - blocking.length
   };
@@ -769,56 +892,62 @@ var buildResponse = (configs) => {
   };
 };
 var scanServers = async (home) => buildResponse(await loadConfigs(home));
-var ownersOf = (configs, id) => configs.filter((config) => config.mcp && Object.prototype.hasOwnProperty.call(config.mcp, id));
-var failList = (title, ids) => {
-  throw new McpError("invalid-manifest", 400, `${title}: ${ids.join(", ")}`);
+var entriesOf = async (home) => {
+  const configs = await loadConfigs(home);
+  return { configs, entries: collect(configs).entries };
 };
-var assertIdKnown = (configs, id) => {
+var entriesFor = (entries, id) => entries.filter((entry) => entry.id === id);
+var assertKnown = (entries, id) => {
   if (!id) throw new McpError("invalid-request", 400, "Missing id");
   if (id.length > 128) throw new McpError("invalid-request", 400, "id is too long");
-  const owners = ownersOf(configs, id);
-  if (owners.length === 0) throw new McpError("not-found", 404, `MCP server ${id} not found`);
-  return owners;
-};
-var definitionOf = (config, id) => {
-  const value = config.mcp?.[id];
-  if (!isPlainObject2(value)) {
-    throw new McpError("invalid-definition", 409, `MCP server ${id} is not a JSON object; edit its definition first`);
+  const found = entriesFor(entries, id);
+  if (found.length === 0) throw new McpError("not-found", 404, `MCP server ${id} not found`);
+  if (found.length > 1) {
+    throw new McpError("conflict", 409, `MCP server ${id} is defined in ${found.length} places; resolve the duplicate first`);
   }
-  return value;
+  return found;
 };
-var applyEnabled = (configs, id, enabled) => {
-  const owners = assertIdKnown(configs, id);
-  if (owners.length > 1) {
-    throw new McpError("conflict", 409, `MCP server ${id} is defined in ${owners.length} config files; resolve the duplicate first`);
+var containerWrite = (config, container, id, definition) => {
+  const mcp = { ...config.mcp ?? {} };
+  if (container === "servers") {
+    const servers = isPlainObject2(mcp.servers) ? { ...mcp.servers } : {};
+    if (definition) servers[id] = definition;
+    else delete servers[id];
+    mcp.servers = servers;
+  } else if (definition) {
+    mcp[id] = definition;
+  } else {
+    delete mcp[id];
   }
-  const config = owners[0];
-  if (!config || !config.mcp) throw new McpError("not-found", 404, `MCP server ${id} not found`);
-  const mcp = { ...config.mcp };
-  mcp[id] = { ...definitionOf(config, id), enabled };
-  return { path: config.path, mcp };
+  return mcp;
+};
+var withFlag = (definition, container, enabled) => {
+  const key = container === "servers" ? "disabled" : "enabled";
+  const other = container === "servers" ? "enabled" : "disabled";
+  const value = container === "servers" ? !enabled : enabled;
+  const next = {};
+  for (const [name, item] of Object.entries(definition)) {
+    if (name === other) continue;
+    next[name] = name === key ? value : item;
+  }
+  if (!(key in next)) next[key] = value;
+  return next;
+};
+var writeToggle = async (configs, entries, id, enabled) => {
+  const [entry] = assertKnown(entries, id);
+  if (!entry) return;
+  const config = configs.find((item) => item.path === entry.path);
+  if (!config) throw new McpError("not-found", 404, `Config for ${id} not found`);
+  if (!entry.definition) throw new McpError("invalid-definition", 409, `MCP server ${id} is not a JSON object; edit its definition first`);
+  await writeMcpBlock(entry.path, containerWrite(config, entry.container, id, withFlag(entry.definition, entry.container, enabled)));
 };
 var setServerEnabled = async (home, id, enabled) => {
-  const configs = await loadConfigs(home);
-  const write = applyEnabled(configs, id, enabled);
-  await writeMcpBlock(write.path, write.mcp);
+  const { configs, entries } = await entriesOf(home);
+  await writeToggle(configs, entries, id, enabled);
   return scanServers(home);
 };
-var collectBatch = (configs, enable, disable) => {
-  const writes = /* @__PURE__ */ new Map();
-  for (const [enabled, ids] of [
-    [true, enable],
-    [false, disable]
-  ]) {
-    for (const id of ids) {
-      const write = applyEnabled(configs, id, enabled);
-      writes.set(write.path, write.mcp);
-    }
-  }
-  return writes;
-};
 var batchSetEnabled = async (home, enable, disable) => {
-  const configs = await loadConfigs(home);
+  const { configs, entries } = await entriesOf(home);
   const enableIds = Array.from(new Set(enable));
   const disableIds = Array.from(new Set(disable));
   if (enableIds.some((id) => disableIds.includes(id))) {
@@ -827,31 +956,39 @@ var batchSetEnabled = async (home, enable, disable) => {
   if (enableIds.length + disableIds.length > 200) {
     throw new McpError("invalid-request", 400, "Too many servers in one request");
   }
-  if (enableIds.length + disableIds.length === 0) {
-    return { ...buildResponse(configs), changed: [] };
-  }
-  const writes = collectBatch(configs, enableIds, disableIds);
+  if (enableIds.length + disableIds.length === 0) return { ...buildResponse(configs), changed: [] };
+  const writes = /* @__PURE__ */ new Map();
+  const stage = (id, enabled) => {
+    const [entry] = assertKnown(entries, id);
+    if (!entry) return;
+    const config = configs.find((item) => item.path === entry.path);
+    if (!config) throw new McpError("invalid-definition", 409, `Config for ${id} not found`);
+    if (!entry.definition) throw new McpError("invalid-definition", 409, `MCP server ${id} cannot be read`);
+    const next = { ...writes.get(entry.path) ?? config.mcp ?? {} };
+    const definition = withFlag(entry.definition, entry.container, enabled);
+    if (entry.container === "servers") {
+      next.servers = { ...isPlainObject2(next.servers) ? next.servers : {}, [id]: definition };
+    } else {
+      next[id] = definition;
+    }
+    writes.set(entry.path, next);
+  };
+  for (const id of enableIds) stage(id, true);
+  for (const id of disableIds) stage(id, false);
   for (const [file, mcp] of writes) await writeMcpBlock(file, mcp);
   const after = await scanServers(home);
   return { ...after, changed: [...enableIds, ...disableIds] };
 };
 var bulkSetEnabled = async (home, enabled) => {
-  const configs = await loadConfigs(home);
+  const { configs, entries } = await entriesOf(home);
   const before = buildResponse(configs);
   const blocking = before.conflicts.filter((conflict) => conflict.blocking);
   if (blocking.length > 0) {
     throw new McpError("conflict", 409, "Config problems remain; bulk changes are blocked", blocking);
   }
   const ids = before.servers.filter((server2) => server2.enabled !== enabled).map((server2) => server2.id);
-  const writable = ids.filter((id) => ownersOf(configs, id).length === 1);
-  if (writable.length !== ids.length) {
-    throw new McpError("conflict", 409, "Some servers are defined in two config files; resolve the duplicates first");
-  }
-  if (writable.length === 0) return { ...before, changed: [] };
-  const writes = collectBatch(configs, enabled ? writable : [], enabled ? [] : writable);
-  for (const [file, mcp] of writes) await writeMcpBlock(file, mcp);
-  const after = await scanServers(home);
-  return { ...after, changed: writable };
+  if (ids.length === 0) return { ...before, changed: [] };
+  return { ...await batchSetEnabled(home, enabled ? ids : [], enabled ? [] : ids), changed: ids };
 };
 var preserveSecrets = (next, previous) => {
   if (!previous) return;
@@ -870,8 +1007,12 @@ var preserveSecrets = (next, previous) => {
   }
   const oauth = next.oauth;
   const priorOauth = previous.oauth;
-  if (isPlainObject2(oauth) && isPlainObject2(priorOauth) && !oauth.clientSecret && priorOauth.clientSecret) {
-    next.oauth = { ...oauth, clientSecret: priorOauth.clientSecret };
+  if (isPlainObject2(oauth) && isPlainObject2(priorOauth)) {
+    const secret = oauth.client_secret ?? oauth.clientSecret;
+    const prior = priorOauth.client_secret ?? priorOauth.clientSecret;
+    if (!secret && typeof prior === "string" && prior.length > 0) {
+      next.oauth = { ...oauth, ..."client_secret" in priorOauth ? { client_secret: prior } : { clientSecret: prior } };
+    }
   }
 };
 var saveServer = async (home, input) => {
@@ -882,48 +1023,54 @@ var saveServer = async (home, input) => {
     throw new McpError("invalid-request", 400, "id must start with a letter or digit and use only letters, digits, dot, dash or underscore");
   }
   const previousId = input.previousId?.trim() ?? id;
-  if (previousId && !previousId.trim()) throw new McpError("invalid-request", 400, "previousId is invalid");
-  const definition = { ...input.definition };
-  definition.enabled = input.enabled !== false;
-  const info = analyzeDefinition(definition);
+  const { configs, entries } = await entriesOf(home);
+  const broken = configs.find((config) => config.parseError);
+  if (broken?.parseError) {
+    throw new McpError("invalid-config", 409, `${broken.parseError}. Fix the file before saving servers.`);
+  }
+  const previousEntries = entriesFor(entries, previousId);
+  if (previousEntries.length > 1) {
+    throw new McpError("conflict", 409, `MCP server ${previousId} is defined in ${previousEntries.length} places; resolve the duplicate first`);
+  }
+  const previousEntry = previousEntries[0];
+  const enabled = input.enabled !== false;
+  const container = previousEntry?.container ?? "servers";
+  const targetPath = previousEntry?.path ?? configs.find((config) => config.exists)?.path ?? configs[0]?.path ?? primaryConfigPath(home);
+  let definition = { ...input.definition };
+  delete definition.enabled;
+  delete definition.disabled;
+  preserveSecrets(definition, previousEntry?.definition ?? void 0);
+  definition = withFlag(definition, container, enabled);
+  const info = analyzeDefinition(definition, container);
   if (info.errors.length > 0) {
     throw new McpError("invalid-definition", 400, `Definition is invalid: ${info.errors.join("; ")}`);
   }
-  const configs = await loadConfigs(home);
-  const broken = configs.find((config) => config.parseError);
-  if (broken?.parseError) {
-    throw new McpError("invalid-config", 409, `${broken.parseError}. Fix the file before adding servers.`);
+  const targetConfig = configs.find((config) => config.path === targetPath);
+  if (!targetConfig) throw new McpError("write-error", 500, "No OpenCode config path available");
+  let mcp = containerWrite(targetConfig, container, id, definition);
+  if (previousEntry && previousEntry.container === "servers" && previousId !== id) {
+    const servers = isPlainObject2(mcp.servers) ? { ...mcp.servers } : {};
+    delete servers[previousId];
+    mcp = { ...mcp, servers };
   }
-  const previousOwners = ownersOf(configs, previousId);
-  const target = previousOwners[0] ?? configs.find((config) => config.exists) ?? configs[0];
-  if (!target) throw new McpError("write-error", 500, "No OpenCode config path available");
-  const previousDefinition = target.mcp?.[previousId];
-  preserveSecrets(definition, isPlainObject2(previousDefinition) ? previousDefinition : void 0);
-  const mcp = { ...target.mcp ?? {} };
-  if (previousOwners.length > 0 && previousId !== id) delete mcp[previousId];
-  mcp[id] = definition;
-  if (Object.keys(mcp).length > MAX_ENTRIES) {
-    throw new McpError("invalid-request", 400, `Cannot have more than ${MAX_ENTRIES} MCP servers`);
+  if (previousEntry && previousEntry.container === "legacy" && previousId !== id) delete mcp[previousId];
+  const backupPath = await writeMcpBlock(targetPath, mcp);
+  for (const other of previousEntries) {
+    if (other.path === targetPath) continue;
+    const otherConfig = configs.find((config) => config.path === other.path);
+    if (!otherConfig) continue;
+    await writeMcpBlock(other.path, containerWrite(otherConfig, other.container, previousId, null));
   }
-  const backupPath = await writeMcpBlock(target.path, mcp);
-  for (const owner of previousOwners) {
-    if (owner.path === target.path || !owner.mcp) continue;
-    const other = { ...owner.mcp };
-    delete other[id === previousId ? id : previousId];
-    await writeMcpBlock(owner.path, other);
-  }
-  const after = await scanServers(home);
-  return { ...after, id, backupPath };
+  return { ...await scanServers(home), id, backupPath };
 };
 var readDefinition = async (home, id) => {
-  const configs = await loadConfigs(home);
-  const owners = assertIdKnown(configs, id);
-  if (owners.length > 1) {
-    throw new McpError("conflict", 409, `MCP server ${id} is defined in ${owners.length} config files; resolve the duplicate first`);
+  const { entries } = await entriesOf(home);
+  const [entry] = assertKnown(entries, id);
+  if (!entry) throw new McpError("not-found", 404, `MCP server ${id} not found`);
+  if (!entry.definition) {
+    throw new McpError("invalid-definition", 409, `MCP server ${id} is not a JSON object; edit the config by hand`);
   }
-  const config = owners[0];
-  if (!config) throw new McpError("not-found", 404, `MCP server ${id} not found`);
-  const definition = JSON.parse(JSON.stringify(definitionOf(config, id)));
+  const definition = JSON.parse(JSON.stringify(entry.definition));
   const masked = [];
   for (const field of ["environment", "headers"]) {
     const block = definition[field];
@@ -933,42 +1080,46 @@ var readDefinition = async (home, id) => {
       masked.push(`${field}.${key}`);
     }
   }
-  if (isPlainObject2(definition.oauth) && typeof definition.oauth.clientSecret === "string" && definition.oauth.clientSecret) {
-    definition.oauth = { ...definition.oauth, clientSecret: "" };
-    masked.push("oauth.clientSecret");
+  const oauth = definition.oauth;
+  if (isPlainObject2(oauth)) {
+    for (const key of ["client_secret", "clientSecret"]) {
+      if (typeof oauth[key] === "string" && oauth[key]) {
+        oauth[key] = "";
+        masked.push(`oauth.${key}`);
+      }
+    }
   }
-  return { id, definition, paths: [config.path], maskedPaths: masked };
+  return { id, container: entry.container, definition, paths: [entry.path], maskedPaths: masked };
 };
 var removeServer = async (home, id) => {
-  const configs = await loadConfigs(home);
-  const owners = assertIdKnown(configs, id);
+  const { configs, entries } = await entriesOf(home);
+  const owners = entriesFor(entries, id);
+  if (owners.length === 0) throw new McpError("not-found", 404, `MCP server ${id} not found`);
   const removedPaths = [];
   for (const owner of owners) {
-    if (!owner.mcp) continue;
-    const mcp = { ...owner.mcp };
-    delete mcp[id];
-    await writeMcpBlock(owner.path, mcp);
+    const config = configs.find((item) => item.path === owner.path);
+    if (!config) continue;
+    await writeMcpBlock(owner.path, containerWrite(config, owner.container, id, null));
     removedPaths.push(owner.path);
   }
-  const after = await scanServers(home);
-  return { ...after, id, removedPaths };
+  return { ...await scanServers(home), id, removedPaths: Array.from(new Set(removedPaths)) };
 };
-var resolveDuplicate = async (home, id, keepPath) => {
-  const configs = await loadConfigs(home);
-  const owners = assertIdKnown(configs, id);
+var resolveDuplicate = async (home, id, keepTarget) => {
+  const { configs, entries } = await entriesOf(home);
+  const owners = entriesFor(entries, id);
   if (owners.length < 2) throw new McpError("not-found", 404, `MCP server ${id} is not defined twice`);
-  const keep = owners.find((owner) => owner.path === keepPath);
-  if (!keep) throw new McpError("invalid-request", 400, "keep must be one of the config paths that define this server");
-  let backupPath = `${keepPath}.mcp-manager.bak`;
+  const parsed = splitTarget(keepTarget);
+  const keep = owners.find((entry) => entry.path === parsed?.path && entry.container === parsed.container);
+  if (!keep) throw new McpError("invalid-request", 400, "keep must be one of the definitions reported for this server");
+  let backupPath = `${keep.path}.mcp-manager.bak`;
   for (const owner of owners) {
-    if (owner.path === keepPath || !owner.mcp) continue;
-    const mcp = { ...owner.mcp };
-    delete mcp[id];
-    backupPath = await writeMcpBlock(owner.path, mcp) ?? backupPath;
+    if (owner.path === keep.path && owner.container === keep.container) continue;
+    const config = configs.find((item) => item.path === owner.path);
+    if (!config) continue;
+    backupPath = await writeMcpBlock(owner.path, containerWrite(config, owner.container, id, null)) ?? backupPath;
   }
   return { ...await scanServers(home), backupPath };
 };
-var looksLikeDefinition = (value) => value.type === "local" || value.type === "remote" || value.command !== void 0 || value.url !== void 0;
 var readImportText = async (kind, value) => {
   if (kind === "paste") {
     if (!value.trim()) throw new McpError("invalid-request", 400, "Paste a manifest first");
@@ -1017,9 +1168,7 @@ var readImportText = async (kind, value) => {
           } catch {
           }
         }
-        if (!found) {
-          throw new McpError("import-failed", 404, `No mcp.json, .mcp.json or opencode.json in ${target}`);
-        }
+        if (!found) throw new McpError("import-failed", 404, `No mcp.json, .mcp.json or opencode.json in ${target}`);
         text = await fs3.readFile(found, "utf8");
         return { text, source: found };
       }
@@ -1033,6 +1182,13 @@ var readImportText = async (kind, value) => {
   }
   throw new McpError("invalid-request", 400, "kind must be paste, url or path");
 };
+var normalizeForImport = (definition) => {
+  const next = { ...definition };
+  delete next.enabled;
+  delete next.disabled;
+  if (typeof next.timeout === "number") next.timeout = { execution: next.timeout };
+  return next;
+};
 var importManifest = async (home, kind, value) => {
   const { text, source } = await readImportText(kind, value);
   let parsed;
@@ -1042,10 +1198,16 @@ var importManifest = async (home, kind, value) => {
     throw new McpError("invalid-manifest", 400, `Manifest is not valid JSON(C): ${error instanceof Error ? error.message : "parse error"}`);
   }
   if (!isPlainObject2(parsed)) throw new McpError("invalid-manifest", 400, "Manifest must be a JSON object");
-  const drafts = [];
   const candidates = [];
   if (isPlainObject2(parsed.mcp)) {
-    for (const [id, definition] of Object.entries(parsed.mcp)) candidates.push([id, definition]);
+    const block = parsed.mcp;
+    if (isPlainObject2(block.servers)) {
+      for (const [id, definition] of Object.entries(block.servers)) candidates.push([id, definition]);
+    }
+    for (const [id, definition] of Object.entries(block)) {
+      if (RESERVED_KEYS.has(id) && (id === "servers" || !looksLikeDefinition(definition))) continue;
+      candidates.push([id, definition]);
+    }
   } else if (looksLikeDefinition(parsed)) {
     const name = typeof parsed.name === "string" ? parsed.name : typeof parsed.id === "string" ? parsed.id : "";
     if (!name) {
@@ -1058,21 +1220,26 @@ var importManifest = async (home, kind, value) => {
   }
   if (candidates.length === 0) throw new McpError("invalid-manifest", 400, "Manifest contains no servers");
   if (candidates.length > MAX_ENTRIES) throw new McpError("invalid-manifest", 400, `Manifest has more than ${MAX_ENTRIES} servers`);
+  const drafts = [];
   const invalid = [];
-  for (const [id, definition] of candidates) {
+  for (const [id, raw] of candidates) {
     if (!ID_PATTERN.test(id)) {
       invalid.push(`${id} (invalid id)`);
       continue;
     }
-    if (!isPlainObject2(definition)) {
+    if (!isPlainObject2(raw)) {
       invalid.push(`${id} (not an object)`);
       continue;
     }
-    const info = analyzeDefinition(definition);
+    const definition = normalizeForImport(raw);
+    const info = analyzeDefinition(definition, "servers");
+    const enabled = raw.enabled !== false && raw.disabled !== true;
     if (info.errors.length > 0) invalid.push(`${id} (${info.errors[0]})`);
-    else drafts.push({ id, definition, enabled: definition.enabled !== false });
+    else drafts.push({ id, definition, enabled });
   }
-  if (invalid.length > 0) failList("Manifest contains invalid servers", invalid);
+  if (invalid.length > 0) {
+    throw new McpError("invalid-manifest", 400, `Manifest contains invalid servers: ${invalid.join(", ")}`);
+  }
   const current = buildResponse(await loadConfigs(home));
   const existing = drafts.map((draft) => draft.id).filter((id) => current.servers.some((server2) => server2.id === id));
   return { drafts, existing, source };
