@@ -7,6 +7,8 @@ const logDir = (home: string): string => path.join(home, '.local', 'share', 'ope
 
 /** Only the tail matters: the newest run is at the end of the file. */
 const TAIL_BYTES = 4 * 1024 * 1024;
+/** Read backwards in small chunks so a scan does not allocate the whole tail at once. */
+const CHUNK_BYTES = 128 * 1024;
 
 /** Messages that mean the server did not load; anything else is runtime noise. */
 const FAILED_MESSAGES = new Set([
@@ -71,21 +73,40 @@ const parseLine = (line: string): { id: string; event: RawEvent } | null => {
   };
 };
 
-const readTail = async (file: string): Promise<string[]> => {
+const readTail = async (file: string, pending: Set<string> | null): Promise<Map<string, RawEvent>> => {
+  const found = new Map<string, RawEvent>();
+  const wanted = (id: string): boolean => !pending || pending.has(id);
   let handle: fs.FileHandle | null = null;
   try {
     handle = await fs.open(file, 'r');
     const { size } = await handle.stat();
-    const length = Math.min(size, TAIL_BYTES);
-    const buffer = Buffer.alloc(length);
-    await handle.read(buffer, 0, length, size - length);
-    const text = buffer.toString('utf8');
-    const lines = text.split('\n');
-    // A tail read can start mid-line; drop that fragment unless it began the file.
-    if (length < size) lines.shift();
-    return lines;
+    let position = size;
+    let budget = TAIL_BYTES;
+    let carry = '';
+    while (position > 0 && budget > 0 && (!pending || pending.size > 0)) {
+      const length = Math.min(CHUNK_BYTES, position, budget);
+      const buffer = Buffer.allocUnsafe(length);
+      await handle.read(buffer, 0, length, position - length);
+      budget -= length;
+      position -= length;
+      // carry holds the head of the previous (later) chunk: that line was cut mid-way.
+      const lines = (buffer.toString('utf8') + carry).split('\n');
+      // A chunk that reaches byte 0 starts on a real line boundary; otherwise its first
+      // line is a fragment that the next (earlier) chunk completes.
+      carry = position === 0 ? '' : (lines.shift() ?? '');
+      // Backwards: the first event seen for an id is the newest one, so never overwrite.
+      for (let index = lines.length - 1; index >= 0; index -= 1) {
+        const line = lines[index];
+        if (!line || !line.includes('mcp ')) continue;
+        const parsed = parseLine(line);
+        if (!parsed || !wanted(parsed.id) || found.has(parsed.id)) continue;
+        found.set(parsed.id, parsed.event);
+        pending?.delete(parsed.id);
+      }
+    }
+    return found;
   } catch {
-    return [];
+    return found;
   } finally {
     await handle?.close().catch(() => undefined);
   }
@@ -117,19 +138,19 @@ const pickLogFiles = async (home: string): Promise<string[]> => {
 
 /**
  * Last load outcome per server, from OpenCode's own log — both "connected" and the
- * failures. A later event replaces an earlier one, so the panel reports what is still
- * true at the end of the log instead of a timestamp heuristic.
+ * failures. Read backwards so the first event per id is the newest, and stop as soon as
+ * every id the caller cares about has one: the tail budget is a ceiling, not a target.
  */
-export const readServerOutcomes = async (home: string): Promise<Map<string, ServerRuntimeView>> => {
+export const readServerOutcomes = async (
+  home: string,
+  ids?: Iterable<string>,
+): Promise<Map<string, ServerRuntimeView>> => {
+  const pending = ids ? new Set(ids) : null;
   const latest = new Map<string, RawEvent>();
   for (const file of await pickLogFiles(home)) {
-    for (const line of await readTail(file)) {
-      if (!line.includes('mcp ')) continue;
-      const parsed = parseLine(line);
-      if (!parsed) continue;
-      const previous = latest.get(parsed.id);
-      if (!previous || parsed.event.at >= previous.at) latest.set(parsed.id, parsed.event);
-    }
+    if (pending && pending.size === 0) break;
+    const events = await readTail(file, pending);
+    for (const [id, event] of events) if (!latest.has(id)) latest.set(id, event);
   }
   const outcomes = new Map<string, ServerRuntimeView>();
   for (const [id, event] of latest) {

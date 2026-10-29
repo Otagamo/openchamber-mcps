@@ -217,7 +217,10 @@ connect clears an earlier failure without any timestamp heuristic.
 **Why.** The only source of runtime truth without breaking decision 1 is the log OpenCode already
 writes, which carries `status.error`, HTTP status, origin and the directory of the attempt.
 
-**Cost.** One 4 MB tail read per scan (~30 ms on a 37 MB log), read-only, no new permission.
+**Cost.** A reverse read in 128 KB chunks that stops as soon as every configured id has an event
+(worst case 4 MB, typically well under 200 KB), read-only, no new permission: ~25 ms and
+~3 MB of RSS on a 37 MB log. The first version read the whole 4 MB tail per scan and kept
+~8 MB of buffer alive; backwards chunking removed that.
 **Known limit.** If the log is rotated or emptied, runtime state disappears from the panel.
 
 ## 21. Enabling means "written", and the panel says so

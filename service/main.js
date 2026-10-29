@@ -497,6 +497,7 @@ import fs3 from "node:fs/promises";
 import path3 from "node:path";
 var logDir = (home) => path3.join(home, ".local", "share", "opencode", "log");
 var TAIL_BYTES = 4 * 1024 * 1024;
+var CHUNK_BYTES = 128 * 1024;
 var FAILED_MESSAGES = /* @__PURE__ */ new Set([
   "mcp connect failed",
   "mcp http authentication rejected",
@@ -542,20 +543,36 @@ var parseLine = (line) => {
     }
   };
 };
-var readTail = async (file) => {
+var readTail = async (file, pending) => {
+  const found = /* @__PURE__ */ new Map();
+  const wanted = (id) => !pending || pending.has(id);
   let handle2 = null;
   try {
     handle2 = await fs3.open(file, "r");
     const { size } = await handle2.stat();
-    const length = Math.min(size, TAIL_BYTES);
-    const buffer = Buffer.alloc(length);
-    await handle2.read(buffer, 0, length, size - length);
-    const text = buffer.toString("utf8");
-    const lines = text.split("\n");
-    if (length < size) lines.shift();
-    return lines;
+    let position = size;
+    let budget = TAIL_BYTES;
+    let carry = "";
+    while (position > 0 && budget > 0 && (!pending || pending.size > 0)) {
+      const length = Math.min(CHUNK_BYTES, position, budget);
+      const buffer = Buffer.allocUnsafe(length);
+      await handle2.read(buffer, 0, length, position - length);
+      budget -= length;
+      position -= length;
+      const lines = (buffer.toString("utf8") + carry).split("\n");
+      carry = position === 0 ? "" : lines.shift() ?? "";
+      for (let index = lines.length - 1; index >= 0; index -= 1) {
+        const line = lines[index];
+        if (!line || !line.includes("mcp ")) continue;
+        const parsed = parseLine(line);
+        if (!parsed || !wanted(parsed.id) || found.has(parsed.id)) continue;
+        found.set(parsed.id, parsed.event);
+        pending?.delete(parsed.id);
+      }
+    }
+    return found;
   } catch {
-    return [];
+    return found;
   } finally {
     await handle2?.close().catch(() => void 0);
   }
@@ -579,16 +596,13 @@ var pickLogFiles = async (home) => {
   const newest = candidates.filter((item) => item !== null).sort((left, right) => right.mtime - left.mtime)[0];
   return newest ? [newest.file] : [];
 };
-var readServerOutcomes = async (home) => {
+var readServerOutcomes = async (home, ids) => {
+  const pending = ids ? new Set(ids) : null;
   const latest = /* @__PURE__ */ new Map();
   for (const file of await pickLogFiles(home)) {
-    for (const line of await readTail(file)) {
-      if (!line.includes("mcp ")) continue;
-      const parsed = parseLine(line);
-      if (!parsed) continue;
-      const previous = latest.get(parsed.id);
-      if (!previous || parsed.event.at >= previous.at) latest.set(parsed.id, parsed.event);
-    }
+    if (pending && pending.size === 0) break;
+    const events = await readTail(file, pending);
+    for (const [id, event] of events) if (!latest.has(id)) latest.set(id, event);
   }
   const outcomes = /* @__PURE__ */ new Map();
   for (const [id, event] of latest) {
@@ -888,7 +902,10 @@ var collect = (configs) => {
 var containerLabel = (container) => container === "servers" ? "mcp.servers" : "a deprecated top-level entry";
 var buildResponse = async (home, configs) => {
   const { entries, configConflicts } = collect(configs);
-  const outcomes = await readServerOutcomes(home);
+  const outcomes = await readServerOutcomes(
+    home,
+    entries.map((entry) => entry.id)
+  );
   const groups = /* @__PURE__ */ new Map();
   for (const entry of entries) {
     const group = groups.get(entry.id);

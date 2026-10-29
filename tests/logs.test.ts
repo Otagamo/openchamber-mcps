@@ -83,6 +83,30 @@ test('escaped quotes inside the error survive', async () => {
   assert.equal((await readServerOutcomes(home)).get('x')?.detail, 'Download failed: "not found"');
 });
 
+test('events split across read chunks are still parsed', async () => {
+  const padding = Array.from({ length: 900 }, (_, index) =>
+    `timestamp=2026-10-29T09:00:00.000Z level=INFO message="mcp connected" server=filler${index} tools=1 role=server server=filler${index}`,
+  );
+  const hop = `timestamp=2026-10-29T11:00:00.000Z level=WARN message="mcp connect failed" server=late status.error="boom late" role=server server=late`;
+  const filler = 'x'.repeat(600) + ' level=INFO message="config loaded"';
+  await writeLog([failed('early', '2026-10-29T08:00:00.000Z', 'boom early'), filler, ...padding, hop]);
+  const outcomes = await readServerOutcomes(home);
+  assert.equal(outcomes.size, 900 + 2);
+  assert.equal(outcomes.get('early')?.detail, 'boom early');
+  assert.equal(outcomes.get('late')?.detail, 'boom late');
+});
+
+test('with an id list it stops early but still finds the newest event', async () => {
+  await writeLog([
+    failed('wanted', '2026-10-29T09:00:00.000Z', 'first'),
+    connected('wanted', '2026-10-29T10:00:00.000Z'),
+    failed('ignored', '2026-10-29T10:30:00.000Z', 'not for us'),
+  ]);
+  const outcomes = await readServerOutcomes(home, ['wanted']);
+  assert.equal(outcomes.size, 1);
+  assert.equal(outcomes.get('wanted')?.ok, true);
+});
+
 test('no log directory means no outcomes', async () => {
   assert.equal((await readServerOutcomes(home)).size, 0);
 });

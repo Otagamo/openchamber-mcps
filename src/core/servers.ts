@@ -388,7 +388,10 @@ const containerLabel = (container: ContainerKind): string =>
 
 const buildResponse = async (home: string, configs: LoadedConfig[]): Promise<ServersResponse> => {
   const { entries, configConflicts } = collect(configs);
-  const outcomes = await readServerOutcomes(home);
+  const outcomes = await readServerOutcomes(
+    home,
+    entries.map((entry) => entry.id),
+  );
   const groups = new Map<string, Entry[]>();
   for (const entry of entries) {
     const group = groups.get(entry.id);
