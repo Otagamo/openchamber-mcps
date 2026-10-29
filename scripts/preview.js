@@ -23,6 +23,14 @@ const baseServers = () => ({
     },
     enabled: true,
     paths: [primary],
+    runtime: {
+      ok: true,
+      message: "mcp connected",
+      detail: null,
+      at: "2026-10-29T17:40:02.101Z",
+      directory: "C:\\\\Projetos\\\\Outros\\\\openchamber-mcps",
+      tools: 12,
+    },
   },
   github: {
     definition: {
@@ -90,12 +98,14 @@ const baseServers = () => ({
     },
     enabled: true,
     paths: [primary],
-    failure: {
+    runtime: {
+      ok: false,
       message: "mcp connect failed",
       detail:
         "Error POSTing to endpoint: bad request: Authorization header is badly formatted (HTTP 400)",
       at: "2026-10-29T17:52:11.402Z",
       directory: "C:\\\\Projetos\\\\Outros\\\\openchamber-mcps",
+      tools: null,
     },
   },
 });
@@ -207,7 +217,7 @@ const view = (id, entry) => {
     ),
     conflicts: entry.conflicts ?? [],
     warnings: entry.warnings ?? [],
-    failure: entry.failure ?? null,
+    runtime: entry.runtime ?? null,
     contentHash: `${id}-hash`,
   };
 };

@@ -322,13 +322,13 @@ test('scanServers attaches the load failure OpenCode logged', async () => {
     'utf8',
   );
   const scan = await scanServers(home);
-  assert.equal(scan.servers[0]?.failure?.detail, 'spawn ENOENT');
-  assert.equal(scan.servers[0]?.failure?.message, 'mcp connect failed');
+  assert.equal(scan.servers[0]?.runtime?.detail, 'spawn ENOENT');
+  assert.equal(scan.servers[0]?.runtime?.message, 'mcp connect failed');
 });
 
-test('scanServers leaves failure null when the log has no entry', async () => {
+test('scanServers leaves runtime null when the log has no entry', async () => {
   await writeConfig({ mcp: { servers: { docs: { type: 'local', command: ['a'] } } } });
-  assert.equal((await scanServers(home)).servers[0]?.failure, null);
+  assert.equal((await scanServers(home)).servers[0]?.runtime, null);
 });
 
 test('group config round-trips through mcp-manager/groups.json', async () => {

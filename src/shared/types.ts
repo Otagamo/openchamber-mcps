@@ -28,11 +28,13 @@ export type ConflictView = {
   blocking: boolean;
 };
 
-export type ServerFailureView = {
+export type ServerRuntimeView = {
+  ok: boolean;
   message: string;
   detail: string | null;
   at: string;
   directory: string | null;
+  tools: number | null;
 };
 
 export type ServerView = {
@@ -58,8 +60,8 @@ export type ServerView = {
   targets: string[];
   conflicts: ConflictView[];
   warnings: string[];
-  /** Last load failure reported by OpenCode's log; null when it loaded or never ran. */
-  failure: ServerFailureView | null;
+  /** Last load outcome OpenCode logged for this id; null when it never ran. */
+  runtime: ServerRuntimeView | null;
   contentHash: string;
 };
 

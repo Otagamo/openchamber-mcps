@@ -29,9 +29,12 @@ below needs a human, a real OpenChamber, and a real OpenCode config.
 
 ## Load failures
 
-- [ ] Point a local server's command at a missing binary and start a session → the row shows the
-      `failed` badge, the switch note reads "Failed to load", and **Why did it fail?** opens the
-      cause OpenCode logged (e.g. `spawn … ENOENT`).
+- [ ] Enable a server that starts fine → row reads **Starting…**, then
+      **Connected · N tools** within the 15 s window (OpenCode reloads the config).
+- [ ] Enable a server whose command does not exist → row reads **Failed to load** with the cause,
+      without pressing Rescan (same window).
+- [ ] Enable with no reload happening → after ~15 s it settles on **Enabled · not loaded yet**;
+      **Rescan** later picks up the real outcome.
 - [ ] A remote server with a bad `Authorization` header → disclosure shows the HTTP status and the
       endpoint, not a stack trace.
 - [ ] Fix the cause and let it connect → after **Rescan** the badge is gone (a later

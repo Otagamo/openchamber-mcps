@@ -42,7 +42,10 @@ test('a later connect clears an earlier failure', async () => {
     failed('docs', '2026-10-29T10:00:00.000Z', 'boom'),
     connected('docs', '2026-10-29T10:05:00.000Z'),
   ]);
-  assert.equal((await readServerOutcomes(home)).has('docs'), false);
+  const outcome = (await readServerOutcomes(home)).get('docs');
+  assert.equal(outcome?.ok, true);
+  assert.equal(outcome?.detail, null);
+  assert.equal(outcome?.tools, 3);
 });
 
 test('a failure after a connect is reported', async () => {

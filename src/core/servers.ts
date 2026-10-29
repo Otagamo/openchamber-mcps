@@ -388,7 +388,7 @@ const containerLabel = (container: ContainerKind): string =>
 
 const buildResponse = async (home: string, configs: LoadedConfig[]): Promise<ServersResponse> => {
   const { entries, configConflicts } = collect(configs);
-  const failures = await readServerOutcomes(home);
+  const outcomes = await readServerOutcomes(home);
   const groups = new Map<string, Entry[]>();
   for (const entry of entries) {
     const group = groups.get(entry.id);
@@ -478,7 +478,7 @@ const buildResponse = async (home: string, configs: LoadedConfig[]): Promise<Ser
       warnings: Array.from(
         new Set([...winner.info.warnings, ...conflicts.filter((item) => !item.blocking).map((item) => item.message)]),
       ),
-      failure: failures.get(id) ?? null,
+      runtime: outcomes.get(id) ?? null,
       contentHash: winner.hash,
     });
   }

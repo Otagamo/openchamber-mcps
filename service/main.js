@@ -537,7 +537,8 @@ var parseLine = (line) => {
       detail: failed ? describeDetail(line, message) : null,
       at,
       atText,
-      directory: field(line, "directory")
+      directory: field(line, "directory"),
+      tools: Number.parseInt(field(line, "tools") ?? "", 10)
     }
   };
 };
@@ -589,17 +590,18 @@ var readServerOutcomes = async (home) => {
       if (!previous || parsed.event.at >= previous.at) latest.set(parsed.id, parsed.event);
     }
   }
-  const failures = /* @__PURE__ */ new Map();
+  const outcomes = /* @__PURE__ */ new Map();
   for (const [id, event] of latest) {
-    if (event.ok) continue;
-    failures.set(id, {
+    outcomes.set(id, {
+      ok: event.ok,
       message: event.message,
       detail: event.detail,
       at: event.atText,
-      directory: event.directory
+      directory: event.directory,
+      tools: Number.isFinite(event.tools) ? event.tools : null
     });
   }
-  return failures;
+  return outcomes;
 };
 
 // src/core/servers.ts
@@ -886,7 +888,7 @@ var collect = (configs) => {
 var containerLabel = (container) => container === "servers" ? "mcp.servers" : "a deprecated top-level entry";
 var buildResponse = async (home, configs) => {
   const { entries, configConflicts } = collect(configs);
-  const failures = await readServerOutcomes(home);
+  const outcomes = await readServerOutcomes(home);
   const groups = /* @__PURE__ */ new Map();
   for (const entry of entries) {
     const group = groups.get(entry.id);
@@ -971,7 +973,7 @@ var buildResponse = async (home, configs) => {
       warnings: Array.from(
         /* @__PURE__ */ new Set([...winner.info.warnings, ...conflicts2.filter((item) => !item.blocking).map((item) => item.message)])
       ),
-      failure: failures.get(id) ?? null,
+      runtime: outcomes.get(id) ?? null,
       contentHash: winner.hash
     });
   }

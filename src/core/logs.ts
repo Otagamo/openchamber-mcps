@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import type { ServerFailureView } from '../shared/types.ts';
+import type { ServerRuntimeView } from '../shared/types.ts';
 
 /** OpenCode writes one `key=value` line per event under its data directory. */
 const logDir = (home: string): string => path.join(home, '.local', 'share', 'opencode', 'log');
@@ -23,6 +23,7 @@ type RawEvent = {
   at: number;
   atText: string;
   directory: string | null;
+  tools: number;
 };
 
 const unquote = (value: string): string =>
@@ -65,6 +66,7 @@ const parseLine = (line: string): { id: string; event: RawEvent } | null => {
       at,
       atText,
       directory: field(line, 'directory'),
+      tools: Number.parseInt(field(line, 'tools') ?? '', 10),
     },
   };
 };
@@ -114,11 +116,11 @@ const pickLogFiles = async (home: string): Promise<string[]> => {
 };
 
 /**
- * Last load outcome per server, from OpenCode's own log. A later `mcp connected`
- * clears an earlier failure, so the panel only reports what is still true at the end
- * of the log.
+ * Last load outcome per server, from OpenCode's own log — both "connected" and the
+ * failures. A later event replaces an earlier one, so the panel reports what is still
+ * true at the end of the log instead of a timestamp heuristic.
  */
-export const readServerOutcomes = async (home: string): Promise<Map<string, ServerFailureView>> => {
+export const readServerOutcomes = async (home: string): Promise<Map<string, ServerRuntimeView>> => {
   const latest = new Map<string, RawEvent>();
   for (const file of await pickLogFiles(home)) {
     for (const line of await readTail(file)) {
@@ -129,15 +131,16 @@ export const readServerOutcomes = async (home: string): Promise<Map<string, Serv
       if (!previous || parsed.event.at >= previous.at) latest.set(parsed.id, parsed.event);
     }
   }
-  const failures = new Map<string, ServerFailureView>();
+  const outcomes = new Map<string, ServerRuntimeView>();
   for (const [id, event] of latest) {
-    if (event.ok) continue;
-    failures.set(id, {
+    outcomes.set(id, {
+      ok: event.ok,
       message: event.message,
       detail: event.detail,
       at: event.atText,
       directory: event.directory,
+      tools: Number.isFinite(event.tools) ? event.tools : null,
     });
   }
-  return failures;
+  return outcomes;
 };

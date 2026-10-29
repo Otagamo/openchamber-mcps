@@ -6,7 +6,7 @@ import type {
   ConflictView,
   DetailResponse,
   ServerState,
-  ServerFailureView,
+  ServerRuntimeView,
   ServerView,
   ServersResponse,
   Summary,
@@ -133,14 +133,17 @@ const parseConfig = (value: unknown): ConfigView => {
   };
 };
 
-const parseFailure = (value: unknown): ServerFailureView | null => {
+const parseRuntime = (value: unknown): ServerRuntimeView | null => {
   const record = asRecord(value);
   if (!record) return null;
+  const tools = record.tools;
   return {
+    ok: asBool(record.ok),
     message: asString(record.message, "mcp connect failed"),
     detail: asNullableString(record.detail),
     at: asString(record.at),
     directory: asNullableString(record.directory),
+    tools: typeof tools === "number" && Number.isFinite(tools) ? tools : null,
   };
 };
 
@@ -178,7 +181,7 @@ const parseServer = (value: unknown): ServerView | null => {
           .filter((item): item is ConflictView => item !== null)
       : [],
     warnings: stringArray(record.warnings),
-    failure: parseFailure(record.failure),
+    runtime: parseRuntime(record.runtime),
     contentHash: asString(record.contentHash),
   };
 };
@@ -432,6 +435,9 @@ let serverDraft: ServerDraft | null = null;
 let serverDraftError: string | null = null;
 let query = "";
 let initialized = false;
+/** Set right after enabling: the panel waits for OpenCode to log an outcome. */
+let watch: { id: string; baseline: string | null; deadline: number } | null =
+  null;
 
 const groupSelect = mountSelect(groupSelectRoot, {
   value: "all",
@@ -1772,8 +1778,20 @@ const renderServerEditor = (): void => {
   serverEditor.append(card);
 };
 
-const failureHeadline = (failure: ServerFailureView): string => {
-  switch (failure.message) {
+const runtimeNote = (server: ServerView): string => {
+  if (watch?.id === server.id) return "Starting…";
+  const runtime = server.runtime;
+  if (!runtime) return "Enabled · not loaded yet";
+  if (!runtime.ok) return "Failed to load";
+  if (!server.advertised) return "Connected · tools off";
+  const tools = runtime.tools;
+  return tools !== null && tools > 0
+    ? `Connected · ${tools} tool${tools === 1 ? "" : "s"}`
+    : "Connected";
+};
+
+const runtimeHeadline = (runtime: ServerRuntimeView): string => {
+  switch (runtime.message) {
     case "mcp http authentication rejected":
       return "OpenCode reached the endpoint but it rejected the credentials.";
     case "mcp oauth authorization failed":
@@ -1790,16 +1808,17 @@ const failureTime = (value: string): string => {
 };
 
 /** Native disclosure: no state to track, keyboard accessible, no JS. */
-const failureDetails = (failure: ServerFailureView): HTMLElement => {
+const runtimeDetails = (runtime: ServerRuntimeView): HTMLElement => {
   const details = el("details", "mc-failure");
   const summary = el("summary", "mc-failure-summary", "Why did it fail?");
   const body = el("div", "mc-failure-body");
-  body.append(el("p", "mc-failure-lead", failureHeadline(failure)));
-  if (failure.detail) body.append(el("pre", "mc-failure-detail", failure.detail));
+  body.append(el("p", "mc-failure-lead", runtimeHeadline(runtime)));
+  if (runtime.detail)
+    body.append(el("pre", "mc-failure-detail", runtime.detail));
   const meta = el("p", "mc-failure-meta");
   meta.textContent = [
-    failure.at ? `Last attempt ${failureTime(failure.at)}` : null,
-    failure.directory ? `from ${failure.directory}` : null,
+    runtime.at ? `Last attempt ${failureTime(runtime.at)}` : null,
+    runtime.directory ? `from ${runtime.directory}` : null,
   ]
     .filter(Boolean)
     .join(" · ");
@@ -1850,11 +1869,7 @@ const serverAction = (server: ServerView): HTMLElement => {
     if (checked)
       note.textContent = blocked
         ? "Config cannot be read"
-        : server.failure
-          ? "Failed to load"
-          : server.advertised
-            ? "Visible to model"
-            : "No tools enabled";
+        : runtimeNote(server);
     else note.textContent = blocked ? "Config cannot be read" : "Disabled";
     holder.append(note, control);
   }
@@ -1890,7 +1905,8 @@ const renderServer = (server: ServerView): HTMLElement => {
       "neutral",
     ),
   );
-  if (server.enabled && server.failure) head.append(badge("failed", "error"));
+  if (server.enabled && server.runtime && !server.runtime.ok)
+    head.append(badge("failed", "error"));
 
   const meta = el("div", "mc-meta");
   if (server.container === "legacy")
@@ -1921,7 +1937,8 @@ const renderServer = (server: ServerView): HTMLElement => {
   if (server.warnings.length > 0) {
     main.append(el("p", "mc-warn", server.warnings.slice(0, 2).join(" · ")));
   }
-  if (server.enabled && server.failure) main.append(failureDetails(server.failure));
+  if (server.enabled && server.runtime && !server.runtime.ok)
+    main.append(runtimeDetails(server.runtime));
   row.append(main, serverAction(server));
   return row;
 };
@@ -2028,6 +2045,52 @@ const loadServers = async (
   }
 };
 
+const WATCH_MS = 15_000;
+const WATCH_STEP_MS = 1_500;
+
+/**
+ * After enabling, OpenCode only learns about it on its next config load, so the panel
+ * waits on the log for an outcome instead of claiming success the moment the file changes.
+ */
+const startWatch = (server: ServerView): void => {
+  watch = {
+    id: server.id,
+    baseline: server.runtime?.at ?? null,
+    deadline: Date.now() + WATCH_MS,
+  };
+  window.setTimeout(() => void pollWatch(), WATCH_STEP_MS);
+};
+
+const stopWatch = (): void => {
+  if (!watch) return;
+  watch = null;
+  render();
+};
+
+const pollWatch = async (): Promise<void> => {
+  const current = watch;
+  if (!current) return;
+  if (Date.now() > current.deadline) {
+    stopWatch();
+    return;
+  }
+  await loadServers(false, true);
+  const running = watch;
+  if (!running) return;
+  // Another action took over (toggle, delete, bulk) while the request was in flight.
+  if (busy) return;
+  const server = data?.servers.find((item) => item.id === running.id);
+  if (!server || !server.enabled) {
+    stopWatch();
+    return;
+  }
+  if (server.runtime && server.runtime.at !== running.baseline) {
+    stopWatch();
+    return;
+  }
+  window.setTimeout(() => void pollWatch(), WATCH_STEP_MS);
+};
+
 const reloadGroups = async (force = false): Promise<void> => {
   if ((groupsLoading && !force) || groupDraft) return;
   groupsLoading = true;
@@ -2076,7 +2139,7 @@ const toggleServer = async (
     );
     notice = {
       text: enabled
-        ? `Enabled ${server.id}.`
+        ? `Enabled ${server.id} in the config; waiting for OpenCode to load it.`
         : `Disabled ${server.id}; OpenCode will drop its tools after the next config reload.`,
       tone: "success",
     };
@@ -2094,6 +2157,8 @@ const toggleServer = async (
     return;
   }
   busy = null;
+  if (enabled) startWatch(server);
+  else if (watch?.id === server.id) watch = null;
   render();
   focusServer(server.id);
 };

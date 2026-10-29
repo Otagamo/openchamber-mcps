@@ -205,22 +205,35 @@ documentation open; a form that guesses `command`/`url`/`environment` adds a fai
 without removing work. `POST /servers/save` still creates and renames (used by **Edit** and by
 scripts), so nothing is lost on the service side.
 
-## 20. The failure cause comes from OpenCode's log, not from a probe
+## 20. Runtime state comes from OpenCode's log, not from a probe
 
 **Decision.** After scanning the config, the service reads the tail (4 MB) of
-`~/.local/share/opencode/log/opencode.log`, keeps the latest `mcp` event per server id, and
-reports a failure only when that last event is one: `mcp connect failed`,
-`mcp http authentication rejected` or `mcp oauth authorization failed`. `mcp transport error`
-(runtime noise: cancelled requests, tool errors) is ignored. The panel shows a disclosure only
-when a failure exists.
+`~/.local/share/opencode/log/opencode.log` and keeps the latest `mcp` event per server id: either
+`mcp connected` (with the tool count) or a failure (`mcp connect failed`,
+`mcp http authentication rejected`, `mcp oauth authorization failed`). `mcp transport error`
+(runtime noise: cancelled requests, tool errors) is ignored. The last event wins, so a successful
+connect clears an earlier failure without any timestamp heuristic.
 
-**Why.** The user asked for "the cause when the MCP fails to load". The only source of that
-information without breaking decision 1 is the log OpenCode already writes, which contains the
-`status.error` string, HTTP status, origin and the directory of the attempt. Late-binding to a
-later `mcp connected` line means the badge disappears as soon as the server recovers, instead of
-relying on a timestamp heuristic.
+**Why.** The only source of runtime truth without breaking decision 1 is the log OpenCode already
+writes, which carries `status.error`, HTTP status, origin and the directory of the attempt.
 
 **Cost.** One 4 MB tail read per scan (~30 ms on a 37 MB log), read-only, no new permission.
-**Known limit.** If the log is rotated or emptied, failures vanish from the panel; the data is
-only as fresh as the file.
+**Known limit.** If the log is rotated or emptied, runtime state disappears from the panel.
+
+## 21. Enabling means "written", and the panel says so
+
+**Decision.** A toggle writes the flag and refreshes from disk; the row then reads
+**Starting…** for up to 15 s while the panel polls for a *new* log event for that id (baseline =
+the previous event's timestamp). When one appears the row becomes **Connected · N tools** or
+**Failed to load**; if none appears, it settles on **Enabled · not loaded yet**. The switch never
+claims success on its own, and the toast says "Enabled … in the config; waiting for OpenCode to
+load it".
+
+**Why.** OpenCode only reads the config on reload, so an instant "activated" would be a lie, and
+a blocking probe is exactly what decision 1 forbids. Baseline-plus-poll distinguishes "new outcome"
+from "old outcome still on disk" without inventing timestamps.
+
+**Cost.** A 1.5 s poll for at most 15 s after an enable, stopped as soon as another action takes
+over or the server is gone. **Known limit.** With no reload in the window the row stays
+`not loaded yet`, which is honest but requires **Rescan** later.
 
