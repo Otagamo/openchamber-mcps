@@ -14,7 +14,7 @@
       "panel": {
         "id": "mcp-manager",
         "name": "MCP",
-        "icon": "server",
+        "icon": "plug",
         "entry": "panel/index.html"
       },
       "service": {
