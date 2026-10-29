@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" href="data:," />
+    <title>MCP · Extension preview</title>
+    <style>
+      * { box-sizing: border-box; }
+      body { margin: 0; background: #eeedeb; color: #484744; font: 13px -apple-system, BlinkMacSystemFont, sans-serif; }
+      header { padding: 12px; display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px; }
+      header button { border: 1px solid #ceccc8; border-radius: 6px; background: #faf9f7; padding: 6px 10px; color: inherit; cursor: pointer; }
+      header button[aria-pressed="true"] { border-color: #a4663b; color: #a4663b; }
+      .shell { margin: 8px auto 24px; width: var(--width, 400px); max-width: calc(100vw - 24px); height: 1600px; border: 1px solid #dedbd7; border-radius: 8px; overflow: hidden; background: #faf9f7; }
+      .caption { height: 42px; display: flex; align-items: center; padding: 0 16px; border-bottom: 1px solid #e5e2df; font-size: 14px; font-weight: 500; }
+      iframe { width: 100%; height: calc(100% - 42px); border: 0; display: block; }
+      .dark { background: #171715; color: #dad8d2; }
+      .dark .shell { background: #20201e; border-color: #3a3935; }
+      .dark .caption { border-color: #3a3935; }
+      .dark header button { background: #292825; color: #d9d6cf; border-color: #45433e; }
+      #audit { display: block; text-align: center; margin: 4px 12px; font-size: 11px; white-space: pre-wrap; color: #77736c; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <span>Synthetic data preview · does not read opencode.json</span>
+      <button id="theme">Toggle theme</button>
+      <button id="narrow">Toggle width</button>
+      <button id="clean" aria-pressed="true">Normal</button>
+      <button id="conflict">Config conflict</button>
+      <button id="group">Local group</button>
+      <button id="edit-groups">Edit groups</button>
+      <button id="add-server">Add server</button>
+      <button id="install">Install panel</button>
+      <button id="reload">Reload</button>
+    </header>
+    <output id="audit" aria-live="polite"></output>
+    <div class="shell"><div class="caption">MCP</div><iframe title="MCP extension"></iframe></div>
+    <script type="module" src="/preview.js"></script>
+  </body>
+</html>

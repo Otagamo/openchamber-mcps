@@ -1,93 +1,181 @@
 # openchamber-mcps
 
+**MCP Manager** creates, edits, enables, disables, imports and removes OpenCode MCP servers by
+editing the `mcp` block of `~/.config/opencode/opencode.json`. It never touches the rest of
+your config, never runs an MCP process, and never deletes a definition without saying where the
+backup is.
 
+It is a port of [openchamber-skills](https://github.com/chenyuhao0628/openchamber-skills) to a
+different domain: MCP servers instead of skill files.
 
-## Getting started
+Current version **0.1.0**.
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
+## Highlights
 
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
+- Toggle a server with `"enabled": true` / `false` — the equivalent of the skills rename toggle.
+- Add and edit servers from the panel: `type`, `command`, `cwd`, `environment`, `url`,
+  `headers`, `timeout`, `enabled`, with inline validation before anything is written.
+- Import a manifest by paste, URL or local path (`mcp` block, a single definition with a `name`,
+  or a whole `opencode.json`); every draft is validated first, then saved one by one.
+- Conflict checks: unreadable/invalid config (blocking), the same server in both
+  `opencode.json` and `opencode.jsonc` (blocking), the same key twice inside `mcp`, an invalid
+  definition, tools disabled by the `tools` section, plain-`http` remote URLs.
+- Writes preserve comments, key order and every setting outside the `mcp` block; the previous
+  file is kept as `opencode.json.mcp-manager.bak`.
+- Secrets never leave the config: `environment` and `headers` values are blanked on read and
+  re-attached from the stored definition when you leave the field empty.
+- Editable groups with local persistence for batch toggling, ported unchanged from the skills
+  extension.
+- Local service on `127.0.0.1` with Bearer-token checks. Only the global config is managed.
 
-## Add your files
+## Screenshot
 
-* [Create](https://docs.gitlab.com/user/project/repository/web_editor/#create-a-file) or [upload](https://docs.gitlab.com/user/project/repository/web_editor/#upload-a-file) files
-* [Add files using the command line](https://docs.gitlab.com/topics/git/add_files/#add-files-to-a-git-repository) or push an existing Git repository with the following command:
+<img src="docs/screenshots/panel.jpg" alt="MCP Manager panel" width="420">
 
+*Synthetic preview with sample servers. No real config is read or written.*
+
+## Install
+
+In OpenChamber, open **Settings → Extensions → Add extension → URL** and paste this
+repository's URL. Requires OpenChamber **2.4.0 or newer**; the host fetches the prebuilt
+`panel/main.js` and `service/main.js`. The extension requests no host capabilities.
+
+From a local directory (development):
+
+```sh
+npm ci
+npm run typecheck
+npm run test
 ```
-cd existing_repo
-git remote add origin https://gitlab.com/otagamo/openchamber-mcps.git
-git branch -M main
-git push -uf origin main
+
+`npm run test` builds first. Then use **Settings → Extensions → Add extension → Folder**, pick
+this directory and allow the local service to run.
+
+## How it works
+
+An OpenCode MCP server is a key in the `mcp` object:
+
+```json
+{
+  "mcp": {
+    "everything": { "type": "local", "command": ["npx", "-y", "@modelcontextprotocol/server-everything"], "enabled": true },
+    "docs": { "type": "remote", "url": "https://example.test/mcp", "enabled": false }
+  }
+}
 ```
 
-## Integrate with your tools
+- **Disable** writes `"enabled": false`; **Enable** writes `"enabled": true`.
+- OpenCode starts or skips the server on its next config load. Sessions that already loaded
+  tools keep them until they reload — the panel says so in the footer.
+- Everything else in the file (`$schema`, `theme`, providers, `tools`, …) is left byte-identical.
+- Every write is re-parsed and compared before it replaces the file; if the round-trip does not
+  match, nothing is written.
 
-* [Set up project integrations](https://gitlab.com/otagamo/openchamber-mcps/-/settings/integrations)
+The extension does **not** start, stop or health-check MCP processes. OpenCode owns their
+lifecycle — see [DECISOES.md](DECISOES.md#1-no-process-supervision-startstop-or-health-check).
 
-## Collaborate with your team
+## Panel
 
-* [Invite team members and collaborators](https://docs.gitlab.com/user/project/members/)
-* [Create a new merge request](https://docs.gitlab.com/user/project/merge_requests/creating_merge_requests/)
-* [Automatically close issues from merge requests](https://docs.gitlab.com/user/project/issues/managing_issues/#closing-issues-automatically)
-* [Enable merge request approvals](https://docs.gitlab.com/user/project/merge_requests/approvals/)
-* [Set auto-merge](https://docs.gitlab.com/user/project/merge_requests/auto_merge/)
+- Header: `<advertised> of <total> visible to the model · <enabled> enabled`, then disabled,
+  invalid, blocking conflicts and warning counts.
+- **Add server** opens the editor; each row has **Edit**, **Delete** (inline confirmation) and
+  the enabled switch.
+- Rows show the transport (`local` / `remote`), the command joined or the URL, plus `env`,
+  `headers` and `timeout` when present.
+- **Install from source**: paste, URL, or path; the panel lists what it found, marks ids that
+  already exist, and saves only when you press **Add**.
+- Group tabs (dropdown under 380 px) with **Edit groups**, **Enable group**, **Disable group**
+  and **Only this group**.
+- Conflict card appears only when there is something to report; blocking items come first and
+  warnings collapse into a `details` element.
+- Search filters by id, command, url, env key, header name and warnings.
+- **Rescan** re-reads the config; there is no watcher.
 
-## Test and Deploy
+## Conflicts
 
-Use the built-in continuous integration in GitLab.
+| Kind | Behaviour |
+| --- | --- |
+| Config unreadable or not valid JSON(C) | Blocking; editing, toggling and bulk changes are refused until it is fixed |
+| Same server id in `opencode.json` and `opencode.jsonc` | Blocking; offers **Keep this file** per definition; the losing file is rewritten and backed up |
+| Same key twice inside `mcp` | Warning; OpenCode keeps only the last one |
+| Definition invalid (missing `command`/`url`, bad `type`, bad `timeout`) | Warning; the row shows **Edit definition**, toggling is refused for that server |
+| Tools disabled by the `tools` section | Warning; the server is up but the model cannot call it, so it is not counted as advertised |
+| Remote URL uses plain `http` | Warning |
 
-* [Get started with GitLab CI/CD](https://docs.gitlab.com/ci/quick_start/)
-* [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/user/application_security/sast/)
-* [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/topics/autodevops/requirements/)
-* [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/user/clusters/agent/)
-* [Set up protected environments](https://docs.gitlab.com/ci/environments/protected_environments/)
+## Scope
 
-***
+| Scope | Handled |
+| --- | --- |
+| `~/.config/opencode/opencode.json` | Yes |
+| `~/.config/opencode/opencode.jsonc` | Yes (read; written when it is the file that defines the server) |
+| Project `opencode.json`, `.opencode/` | No |
+| `OPENCODE_CONFIG`, remote or managed config | No |
+| MCP processes, tools, resources, OAuth tokens | No |
 
-# Editing this README
+## Limits
 
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
+- No background watcher; press **Rescan** after the config changes elsewhere.
+- Comments and manual formatting **inside** the `mcp` block are lost on the first write
+  (the rest of the file, and `opencode.json.mcp-manager.bak`, are not).
+- A secret cannot be cleared by emptying the field; delete the row instead.
+- No token estimate and no tool list: both need a live MCP connection (see
+  [DECISOES.md](DECISOES.md)).
+- Multi-window writes are last-write-wins; there is no cross-process lock, but every write is
+  atomic (temp file + rename).
+- Disabling this extension stops the service; it does **not** re-enable or remove servers.
 
-## Suggestions for a good README
+## Data and safety
 
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
+- Written: `~/.config/opencode/opencode.json` (or `.jsonc`), plus
+  `opencode.json.mcp-manager.bak` — the previous file content, written before each replace.
+- Written: `~/.config/openchamber/mcp-manager/groups.json` (`0600`) for panel groups only.
+- Read: the two config files above. Nothing else, no environment, no tokens on disk.
+- Never deleted: the extension removes server keys from config; it does not delete files.
+- The service declares no outbound network, socket or exec permission beyond the host-assigned
+  loopback port. Importing by URL is the only outbound call, made on your explicit request.
 
-## Name
-Choose a self-explaining name for your project.
+## Development
 
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
+```sh
+npm run build      # esbuild → panel/main.js (iife) and service/main.js (esm)
+npm run typecheck  # tsc --noEmit, strict
+npm run test       # builds, then node --experimental-strip-types --test tests/*.test.*
+npm run preview    # synthetic data on 127.0.0.1, never reads your config
+```
 
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
+| Path | Responsibility |
+| --- | --- |
+| `src/core/jsonc.ts` | JSONC tokeniser, comment stripping, single-member splice |
+| `src/core/config.ts` | Config discovery, atomic writes, backup, round-trip verification |
+| `src/core/servers.ts` | Scan, definition validation, conflicts, toggle/batch/bulk, save/remove/import/resolve |
+| `src/core/groups.ts` | Group config read/write with atomic replacement |
+| `src/service/main.ts` | Local HTTP, Bearer check, routing, serialised access |
+| `src/panel/main.ts` | List, switches, editor, import, groups, conflict notices |
+| `src/shared/*` | Data contract and group validation |
+| `tests/` | JSONC splicing, scan/conflict, write paths, secrets, import, groups |
 
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
+## Differences from `openchamber-skills`
 
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
+| | openchamber-skills | openchamber-mcps |
+| --- | --- | --- |
+| Unit | skill entry file | `mcp` key of the OpenCode config |
+| Storage | `~/.config/opencode/skills/**` | `~/.config/opencode/opencode.json` |
+| Disable | rename to `.disabled` | `"enabled": false` |
+| Create | copy a file into the directory | edit form or manifest import |
+| Delete | none (files are never deleted) | removes the key, keeps a `.bak` |
+| Secrets | none | env/header values blanked on read |
+| Cost display | estimated tokens per step | not shown (unknown without a connection) |
+| States | enabled, disabled, mixed, conflict | enabled, disabled, invalid, conflict |
+| Groups | shared file, six presets | shared file, no presets |
 
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
+## Docs
 
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
-
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
-
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
-
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
-
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
-
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
+- [ANALISE_SKILLS.md](ANALISE_SKILLS.md) — how the reference extension is built.
+- [MAPEAMENTO_MCP.md](MAPEAMENTO_MCP.md) — concept-by-concept mapping.
+- [DECISOES.md](DECISOES.md) — every deliberate divergence, with reasons.
+- [docs/EXEMPLOS.md](docs/EXEMPLOS.md) — worked examples.
+- [docs/TESTES-MANUAIS.md](docs/TESTES-MANUAIS.md) — manual test checklist.
 
 ## License
-For open source projects, say how it is licensed.
 
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+MIT.

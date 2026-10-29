@@ -1,0 +1,46 @@
+{
+  "name": "openchamber-mcps",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "description": "OpenChamber extension to manage OpenCode MCP servers in opencode.json: create, edit, enable/disable, import and remove, with conflict checks and config-preserving writes.",
+  "openchamber": {
+    "apiVersion": 1,
+    "engines": {
+      "openchamber": ">=2.4.0"
+    },
+    "contributes": {
+      "panel": {
+        "id": "mcp-manager",
+        "name": "MCP",
+        "icon": "server",
+        "entry": "panel/index.html"
+      },
+      "service": {
+        "entry": "service/main.js",
+        "runtime": "host",
+        "permissions": {}
+      }
+    }
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "watch": "node scripts/build.mjs --watch",
+    "preview": "node scripts/preview.mjs",
+    "typecheck": "tsc --noEmit",
+    "pretest": "npm run build",
+    "test": "node --experimental-strip-types --test tests/*.test.*"
+  },
+  "devDependencies": {
+    "@openchamber/sdk": "2.5.0",
+    "@types/node": "^22.20.5",
+    "esbuild": "^0.25.0",
+    "typescript": "^5.6.0"
+  },
+  "files": [
+    "panel/",
+    "service/",
+    "README.md"
+  ]
+}

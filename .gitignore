@@ -1,0 +1,10 @@
+node_modules/
+dist/
+*.tsbuildinfo
+coverage/
+*.tgz
+.DS_Store
+.env
+.env.*
+*.log
+.cortexkit/
