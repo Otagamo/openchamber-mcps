@@ -59,6 +59,7 @@
   align-items: center;
   flex-wrap: wrap;
   gap: 6px;
+  margin: 0 0 4px;
 }
 .mc-body {
   min-height: 0;
@@ -571,7 +572,7 @@
 .mc-search {
   width: 100%;
   min-height: 32px;
-  margin: 0 0 4px;
+  margin: 0;
   padding: 4px 8px;
   border: 1px solid var(--mc-border);
   border-radius: var(--oc-radius, 6px);

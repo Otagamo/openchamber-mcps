@@ -338,7 +338,7 @@ const disableAll = mountButton(actionRoot, {
   onClick: () => requestBulk(false),
 });
 titleBlock.append(title, titleCount);
-titleRow.append(titleBlock, actionRoot);
+titleRow.append(titleBlock);
 
 header.append(titleRow);
 
@@ -363,12 +363,13 @@ const groupBarRoot = el("div");
 const conflictRoot = el("div");
 const search = el("input", "mc-search");
 search.type = "search";
-search.placeholder = "Search ID, command or URL";
+search.placeholder = "Search name, command or URL";
 search.setAttribute("aria-label", "Search MCP servers");
 search.addEventListener("input", () => {
   query = search.value.trim().toLowerCase();
   renderList();
 });
+header.append(search);
 const listRoot = el("div", "mc-list");
 listRoot.setAttribute("role", "list");
 const footer = el("footer", "mc-footer");
@@ -386,13 +387,13 @@ footer.append(
 );
 body.append(
   noticeRoot,
+  actionRoot,
   groupsNote,
   groupsRow,
   groupEditor,
   serverEditor,
   groupBarRoot,
   conflictRoot,
-  search,
   listRoot,
   footer,
 );
