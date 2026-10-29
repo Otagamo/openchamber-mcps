@@ -217,6 +217,54 @@
   color: var(--mc-muted);
   font-size: 11px;
 }
+.mc-failure {
+  margin: 6px 0 0;
+  padding: 6px 8px;
+  border: 1px solid color-mix(in srgb, var(--mc-error) 35%, var(--mc-border));
+  border-radius: var(--oc-radius, 6px);
+  background: color-mix(in srgb, var(--mc-error) 5%, var(--mc-bg));
+}
+.mc-failure-summary {
+  cursor: pointer;
+  color: var(--mc-fg);
+  font-size: 11px;
+  font-weight: 500;
+}
+.mc-failure-summary:focus-visible {
+  outline: 2px solid var(--oc-focus);
+  outline-offset: 2px;
+}
+.mc-failure-body {
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.mc-failure-lead {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.5;
+}
+.mc-failure-detail {
+  margin: 0;
+  max-height: 180px;
+  overflow: auto;
+  padding: 6px 8px;
+  border-radius: var(--oc-radius, 6px);
+  background: var(--oc-code-bg, rgba(127, 127, 127, 0.12));
+  color: var(--mc-fg);
+  font-family: var(--oc-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.mc-failure-meta {
+  margin: 0;
+  color: var(--mc-muted);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
 
 .mc-groups {
   flex: 1;

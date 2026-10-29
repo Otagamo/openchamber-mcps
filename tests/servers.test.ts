@@ -312,6 +312,25 @@ test('a deprecated stub only carries the flag', () => {
   assert.ok(info.warnings.some((warning) => warning.includes('only sets')));
 });
 
+test('scanServers attaches the load failure OpenCode logged', async () => {
+  await writeConfig({ mcp: { servers: { docs: { type: 'local', command: ['a'] } } } });
+  const dir = path.join(home, '.local', 'share', 'opencode', 'log');
+  await fs.mkdir(dir, { recursive: true });
+  await fs.writeFile(
+    path.join(dir, 'opencode.log'),
+    'timestamp=2026-10-29T10:00:00.000Z level=WARN message="mcp connect failed" server=docs status.error="spawn ENOENT" role=server server=docs\n',
+    'utf8',
+  );
+  const scan = await scanServers(home);
+  assert.equal(scan.servers[0]?.failure?.detail, 'spawn ENOENT');
+  assert.equal(scan.servers[0]?.failure?.message, 'mcp connect failed');
+});
+
+test('scanServers leaves failure null when the log has no entry', async () => {
+  await writeConfig({ mcp: { servers: { docs: { type: 'local', command: ['a'] } } } });
+  assert.equal((await scanServers(home)).servers[0]?.failure, null);
+});
+
 test('group config round-trips through mcp-manager/groups.json', async () => {
   const initial = await readGroups(home);
   assert.deepEqual(initial.groups, []);

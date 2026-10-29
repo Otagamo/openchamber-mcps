@@ -81,6 +81,23 @@ const baseServers = () => ({
     enabled: false,
     paths: [primary],
   },
+  jira: {
+    definition: {
+      type: "remote",
+      url: "https://mcp.atlassian.example.com/mcp",
+      headers: { Authorization: "Bearer atl_example_value" },
+      enabled: true,
+    },
+    enabled: true,
+    paths: [primary],
+    failure: {
+      message: "mcp connect failed",
+      detail:
+        "Error POSTing to endpoint: bad request: Authorization header is badly formatted (HTTP 400)",
+      at: "2026-10-29T17:52:11.402Z",
+      directory: "C:\\\\Projetos\\\\Outros\\\\openchamber-mcps",
+    },
+  },
 });
 
 const defaultGroups = [
@@ -190,6 +207,7 @@ const view = (id, entry) => {
     ),
     conflicts: entry.conflicts ?? [],
     warnings: entry.warnings ?? [],
+    failure: entry.failure ?? null,
     contentHash: `${id}-hash`,
   };
 };

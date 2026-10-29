@@ -26,6 +26,9 @@ Current version **0.1.0**.
   plain-`http` remote URLs.
 - Writes preserve comments, key order, indentation style and line endings outside the `mcp`
   block; the previous file is kept as `opencode.json.mcp-manager.bak`.
+- When OpenCode fails to load an enabled server, the row shows a `failed` badge and a
+  **Why did it fail?** disclosure with the cause it logged — connect error, HTTP status, OAuth
+  failure — plus the timestamp and the directory it tried.
 - Secrets never leave the config: `environment` and `headers` values are blanked on read and
   re-attached from the stored definition when you leave the field empty.
 - Editable groups with local persistence for batch toggling, ported unchanged from the skills
@@ -37,6 +40,10 @@ Current version **0.1.0**.
 <img src="docs/screenshots/panel.jpg" alt="MCP Manager panel" width="420">
 
 *Synthetic preview with sample servers. No real config is read or written.*
+
+<img src="docs/screenshots/panel-failure.jpg" alt="Failure details" width="420">
+
+*A load failure: the badge, the disclosure and the cause OpenCode logged.*
 
 ## Install
 
@@ -129,6 +136,10 @@ lifecycle — see [DECISOES.md](DECISOES.md#1-no-process-supervision-startstop-o
 ## Limits
 
 - No background watcher; press **Rescan** after the config changes elsewhere.
+- Failure details are read from OpenCode's own log
+  (`~/.local/share/opencode/log/opencode.log`, last 4 MB). They show only for an enabled server
+  whose last logged event is a failure, so a later successful connect clears the badge. Nothing
+  is probed and no process is started.
 - No create or import UI: servers are added by editing `mcp.servers` in the config (the service
   still exposes `POST /servers/import` for scripted use). Then press **Rescan**.
 - Inside the `mcp` block the extension re-serialises the servers it writes: comments there are

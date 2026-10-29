@@ -6,6 +6,7 @@ import type {
   ConflictView,
   DetailResponse,
   ServerState,
+  ServerFailureView,
   ServerView,
   ServersResponse,
   Summary,
@@ -132,6 +133,17 @@ const parseConfig = (value: unknown): ConfigView => {
   };
 };
 
+const parseFailure = (value: unknown): ServerFailureView | null => {
+  const record = asRecord(value);
+  if (!record) return null;
+  return {
+    message: asString(record.message, "mcp connect failed"),
+    detail: asNullableString(record.detail),
+    at: asString(record.at),
+    directory: asNullableString(record.directory),
+  };
+};
+
 const parseServer = (value: unknown): ServerView | null => {
   const record = asRecord(value);
   if (
@@ -166,6 +178,7 @@ const parseServer = (value: unknown): ServerView | null => {
           .filter((item): item is ConflictView => item !== null)
       : [],
     warnings: stringArray(record.warnings),
+    failure: parseFailure(record.failure),
     contentHash: asString(record.contentHash),
   };
 };
@@ -1759,6 +1772,42 @@ const renderServerEditor = (): void => {
   serverEditor.append(card);
 };
 
+const failureHeadline = (failure: ServerFailureView): string => {
+  switch (failure.message) {
+    case "mcp http authentication rejected":
+      return "OpenCode reached the endpoint but it rejected the credentials.";
+    case "mcp oauth authorization failed":
+      return "OpenCode could not complete the OAuth flow.";
+    default:
+      return "OpenCode could not start this server.";
+  }
+};
+
+const failureTime = (value: string): string => {
+  const parsed = Date.parse(value);
+  if (Number.isNaN(parsed)) return value;
+  return new Date(parsed).toLocaleString();
+};
+
+/** Native disclosure: no state to track, keyboard accessible, no JS. */
+const failureDetails = (failure: ServerFailureView): HTMLElement => {
+  const details = el("details", "mc-failure");
+  const summary = el("summary", "mc-failure-summary", "Why did it fail?");
+  const body = el("div", "mc-failure-body");
+  body.append(el("p", "mc-failure-lead", failureHeadline(failure)));
+  if (failure.detail) body.append(el("pre", "mc-failure-detail", failure.detail));
+  const meta = el("p", "mc-failure-meta");
+  meta.textContent = [
+    failure.at ? `Last attempt ${failureTime(failure.at)}` : null,
+    failure.directory ? `from ${failure.directory}` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  if (meta.textContent) body.append(meta);
+  details.append(summary, body);
+  return details;
+};
+
 const serverAction = (server: ServerView): HTMLElement => {
   const holder = el("div", "mc-server-action");
   const note = el("span", "mc-action-note");
@@ -1801,9 +1850,11 @@ const serverAction = (server: ServerView): HTMLElement => {
     if (checked)
       note.textContent = blocked
         ? "Config cannot be read"
-        : server.advertised
-          ? "Visible to model"
-          : "No tools enabled";
+        : server.failure
+          ? "Failed to load"
+          : server.advertised
+            ? "Visible to model"
+            : "No tools enabled";
     else note.textContent = blocked ? "Config cannot be read" : "Disabled";
     holder.append(note, control);
   }
@@ -1839,6 +1890,7 @@ const renderServer = (server: ServerView): HTMLElement => {
       "neutral",
     ),
   );
+  if (server.enabled && server.failure) head.append(badge("failed", "error"));
 
   const meta = el("div", "mc-meta");
   if (server.container === "legacy")
@@ -1869,6 +1921,7 @@ const renderServer = (server: ServerView): HTMLElement => {
   if (server.warnings.length > 0) {
     main.append(el("p", "mc-warn", server.warnings.slice(0, 2).join(" · ")));
   }
+  if (server.enabled && server.failure) main.append(failureDetails(server.failure));
   row.append(main, serverAction(server));
   return row;
 };

@@ -143,8 +143,8 @@ var McpError = class extends Error {
 };
 
 // src/core/servers.ts
-import fs3 from "node:fs/promises";
-import path3 from "node:path";
+import fs4 from "node:fs/promises";
+import path4 from "node:path";
 import { createHash } from "node:crypto";
 
 // src/core/config.ts
@@ -492,6 +492,116 @@ var writeMcpBlock = async (target, mcp) => {
   return backupPath;
 };
 
+// src/core/logs.ts
+import fs3 from "node:fs/promises";
+import path3 from "node:path";
+var logDir = (home) => path3.join(home, ".local", "share", "opencode", "log");
+var TAIL_BYTES = 4 * 1024 * 1024;
+var FAILED_MESSAGES = /* @__PURE__ */ new Set([
+  "mcp connect failed",
+  "mcp http authentication rejected",
+  "mcp oauth authorization failed"
+]);
+var CONNECTED_MESSAGE = "mcp connected";
+var unquote = (value) => value.replace(/\\(["\\])/g, "$1").replace(/\\n/g, "\n").replace(/\\r/g, "");
+var field = (line, key) => {
+  const quoted = new RegExp(`(?:^|\\s)${key}="((?:[^"\\\\]|\\\\.)*)"`).exec(line);
+  if (quoted?.[1] !== void 0) return unquote(quoted[1]);
+  const bare = new RegExp(`(?:^|\\s)${key}=([^\\s]+)`).exec(line);
+  return bare?.[1] ?? null;
+};
+var describeDetail = (line, message) => {
+  const error = field(line, "error") ?? field(line, "status.error");
+  if (error) return error;
+  if (message === "mcp http authentication rejected") {
+    const code = field(line, "status");
+    const origin = field(line, "origin");
+    if (code || origin) return [code ? `HTTP ${code}` : null, origin].filter(Boolean).join(" from ");
+  }
+  return null;
+};
+var parseLine = (line) => {
+  const message = field(line, "message");
+  if (!message) return null;
+  const failed = FAILED_MESSAGES.has(message);
+  if (!failed && message !== CONNECTED_MESSAGE) return null;
+  const id = field(line, "server");
+  if (!id) return null;
+  const atText = field(line, "timestamp") ?? "";
+  const at = Number.isNaN(Date.parse(atText)) ? 0 : Date.parse(atText);
+  return {
+    id,
+    event: {
+      ok: !failed,
+      message,
+      detail: failed ? describeDetail(line, message) : null,
+      at,
+      atText,
+      directory: field(line, "directory")
+    }
+  };
+};
+var readTail = async (file) => {
+  let handle2 = null;
+  try {
+    handle2 = await fs3.open(file, "r");
+    const { size } = await handle2.stat();
+    const length = Math.min(size, TAIL_BYTES);
+    const buffer = Buffer.alloc(length);
+    await handle2.read(buffer, 0, length, size - length);
+    const text = buffer.toString("utf8");
+    const lines = text.split("\n");
+    if (length < size) lines.shift();
+    return lines;
+  } catch {
+    return [];
+  } finally {
+    await handle2?.close().catch(() => void 0);
+  }
+};
+var pickLogFiles = async (home) => {
+  const dir = logDir(home);
+  let names;
+  try {
+    names = await fs3.readdir(dir);
+  } catch {
+    return [];
+  }
+  if (names.includes("opencode.log")) return [path3.join(dir, "opencode.log")];
+  const candidates = await Promise.all(
+    names.filter((name) => name.endsWith(".log")).map(async (name) => {
+      const file = path3.join(dir, name);
+      const stat = await fs3.stat(file).catch(() => null);
+      return stat ? { file, mtime: stat.mtimeMs } : null;
+    })
+  );
+  const newest = candidates.filter((item) => item !== null).sort((left, right) => right.mtime - left.mtime)[0];
+  return newest ? [newest.file] : [];
+};
+var readServerOutcomes = async (home) => {
+  const latest = /* @__PURE__ */ new Map();
+  for (const file of await pickLogFiles(home)) {
+    for (const line of await readTail(file)) {
+      if (!line.includes("mcp ")) continue;
+      const parsed = parseLine(line);
+      if (!parsed) continue;
+      const previous = latest.get(parsed.id);
+      if (!previous || parsed.event.at >= previous.at) latest.set(parsed.id, parsed.event);
+    }
+  }
+  const failures = /* @__PURE__ */ new Map();
+  for (const [id, event] of latest) {
+    if (event.ok) continue;
+    failures.set(id, {
+      message: event.message,
+      detail: event.detail,
+      at: event.atText,
+      directory: event.directory
+    });
+  }
+  return failures;
+};
+
 // src/core/servers.ts
 var ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 var MAX_COMMAND_ITEMS = 64;
@@ -774,8 +884,9 @@ var collect = (configs) => {
   return { entries, configConflicts };
 };
 var containerLabel = (container) => container === "servers" ? "mcp.servers" : "a deprecated top-level entry";
-var buildResponse = (configs) => {
+var buildResponse = async (home, configs) => {
   const { entries, configConflicts } = collect(configs);
+  const failures = await readServerOutcomes(home);
   const groups = /* @__PURE__ */ new Map();
   for (const entry of entries) {
     const group = groups.get(entry.id);
@@ -802,7 +913,7 @@ var buildResponse = (configs) => {
       push({
         kind: "both",
         serverId: id,
-        message: `"${id}" is defined in ${group.length} places: ${group.map((entry) => `${path3.basename(entry.path)} (${containerLabel(entry.container)})`).join(", ")}; OpenCode loads only one`,
+        message: `"${id}" is defined in ${group.length} places: ${group.map((entry) => `${path4.basename(entry.path)} (${containerLabel(entry.container)})`).join(", ")}; OpenCode loads only one`,
         paths: Array.from(new Set(group.map((entry) => entry.path))),
         blocking: true
       });
@@ -860,6 +971,7 @@ var buildResponse = (configs) => {
       warnings: Array.from(
         /* @__PURE__ */ new Set([...winner.info.warnings, ...conflicts2.filter((item) => !item.blocking).map((item) => item.message)])
       ),
+      failure: failures.get(id) ?? null,
       contentHash: winner.hash
     });
   }
@@ -891,7 +1003,7 @@ var buildResponse = (configs) => {
     scannedAt: Date.now()
   };
 };
-var scanServers = async (home) => buildResponse(await loadConfigs(home));
+var scanServers = async (home) => buildResponse(home, await loadConfigs(home));
 var entriesOf = async (home) => {
   const configs = await loadConfigs(home);
   return { configs, entries: collect(configs).entries };
@@ -956,7 +1068,7 @@ var batchSetEnabled = async (home, enable, disable) => {
   if (enableIds.length + disableIds.length > 200) {
     throw new McpError("invalid-request", 400, "Too many servers in one request");
   }
-  if (enableIds.length + disableIds.length === 0) return { ...buildResponse(configs), changed: [] };
+  if (enableIds.length + disableIds.length === 0) return { ...await buildResponse(home, configs), changed: [] };
   const writes = /* @__PURE__ */ new Map();
   const stage = (id, enabled) => {
     const [entry] = assertKnown(entries, id);
@@ -981,7 +1093,7 @@ var batchSetEnabled = async (home, enable, disable) => {
 };
 var bulkSetEnabled = async (home, enabled) => {
   const { configs, entries } = await entriesOf(home);
-  const before = buildResponse(configs);
+  const before = await buildResponse(home, configs);
   const blocking = before.conflicts.filter((conflict) => conflict.blocking);
   if (blocking.length > 0) {
     throw new McpError("conflict", 409, "Config problems remain; bulk changes are blocked", blocking);
@@ -992,9 +1104,9 @@ var bulkSetEnabled = async (home, enabled) => {
 };
 var preserveSecrets = (next, previous) => {
   if (!previous) return;
-  for (const field of ["environment", "headers"]) {
-    const source = previous[field];
-    const target = next[field];
+  for (const field2 of ["environment", "headers"]) {
+    const source = previous[field2];
+    const target = next[field2];
     if (!isPlainObject2(source) || !isPlainObject2(target)) continue;
     const merged = { ...target };
     for (const [key, value] of Object.entries(target)) {
@@ -1003,7 +1115,7 @@ var preserveSecrets = (next, previous) => {
       if (typeof prior === "string" && prior.length > 0) merged[key] = prior;
       else delete merged[key];
     }
-    next[field] = merged;
+    next[field2] = merged;
   }
   const oauth = next.oauth;
   const priorOauth = previous.oauth;
@@ -1072,12 +1184,12 @@ var readDefinition = async (home, id) => {
   }
   const definition = JSON.parse(JSON.stringify(entry.definition));
   const masked = [];
-  for (const field of ["environment", "headers"]) {
-    const block = definition[field];
+  for (const field2 of ["environment", "headers"]) {
+    const block = definition[field2];
     if (!isPlainObject2(block)) continue;
     for (const key of Object.keys(block)) {
       block[key] = "";
-      masked.push(`${field}.${key}`);
+      masked.push(`${field2}.${key}`);
     }
   }
   const oauth = definition.oauth;
@@ -1152,27 +1264,27 @@ var readImportText = async (kind, value) => {
     }
   }
   if (kind === "path") {
-    const target = path3.resolve(value.trim());
+    const target = path4.resolve(value.trim());
     let text;
     try {
-      const info = await fs3.stat(target);
+      const info = await fs4.stat(target);
       if (info.isDirectory()) {
         const candidates = ["mcp.json", ".mcp.json", "opencode.json", "opencode.jsonc"];
         let found = null;
         for (const candidate of candidates) {
-          const file = path3.join(target, candidate);
+          const file = path4.join(target, candidate);
           try {
-            await fs3.access(file);
+            await fs4.access(file);
             found = file;
             break;
           } catch {
           }
         }
         if (!found) throw new McpError("import-failed", 404, `No mcp.json, .mcp.json or opencode.json in ${target}`);
-        text = await fs3.readFile(found, "utf8");
+        text = await fs4.readFile(found, "utf8");
         return { text, source: found };
       }
-      text = await fs3.readFile(target, "utf8");
+      text = await fs4.readFile(target, "utf8");
     } catch (error) {
       if (error instanceof McpError) throw error;
       throw new McpError("import-failed", 400, `Cannot read ${target}: ${describeFs(error)}`);
@@ -1240,7 +1352,7 @@ var importManifest = async (home, kind, value) => {
   if (invalid.length > 0) {
     throw new McpError("invalid-manifest", 400, `Manifest contains invalid servers: ${invalid.join(", ")}`);
   }
-  const current = buildResponse(await loadConfigs(home));
+  const current = await buildResponse(home, await loadConfigs(home));
   const existing = drafts.map((draft) => draft.id).filter((id) => current.servers.some((server2) => server2.id === id));
   return { drafts, existing, source };
 };

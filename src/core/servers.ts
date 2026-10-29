@@ -22,6 +22,7 @@ import type {
 import { McpError } from './errors.ts';
 import { describeFs, loadConfigs, primaryConfigPath, writeMcpBlock, type LoadedConfig } from './config.ts';
 import { parseJsonc } from './jsonc.ts';
+import { readServerOutcomes } from './logs.ts';
 
 export const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 const MAX_COMMAND_ITEMS = 64;
@@ -385,8 +386,9 @@ const collect = (configs: LoadedConfig[]): { entries: Entry[]; configConflicts: 
 const containerLabel = (container: ContainerKind): string =>
   container === 'servers' ? 'mcp.servers' : 'a deprecated top-level entry';
 
-const buildResponse = (configs: LoadedConfig[]): ServersResponse => {
+const buildResponse = async (home: string, configs: LoadedConfig[]): Promise<ServersResponse> => {
   const { entries, configConflicts } = collect(configs);
+  const failures = await readServerOutcomes(home);
   const groups = new Map<string, Entry[]>();
   for (const entry of entries) {
     const group = groups.get(entry.id);
@@ -476,6 +478,7 @@ const buildResponse = (configs: LoadedConfig[]): ServersResponse => {
       warnings: Array.from(
         new Set([...winner.info.warnings, ...conflicts.filter((item) => !item.blocking).map((item) => item.message)]),
       ),
+      failure: failures.get(id) ?? null,
       contentHash: winner.hash,
     });
   }
@@ -510,7 +513,7 @@ const buildResponse = (configs: LoadedConfig[]): ServersResponse => {
   };
 };
 
-export const scanServers = async (home: string): Promise<ServersResponse> => buildResponse(await loadConfigs(home));
+export const scanServers = async (home: string): Promise<ServersResponse> => buildResponse(home, await loadConfigs(home));
 
 const entriesOf = async (home: string): Promise<{ configs: LoadedConfig[]; entries: Entry[] }> => {
   const configs = await loadConfigs(home);
@@ -597,7 +600,7 @@ export const batchSetEnabled = async (home: string, enable: string[], disable: s
   if (enableIds.length + disableIds.length > 200) {
     throw new McpError('invalid-request', 400, 'Too many servers in one request');
   }
-  if (enableIds.length + disableIds.length === 0) return { ...buildResponse(configs), changed: [] };
+  if (enableIds.length + disableIds.length === 0) return { ...(await buildResponse(home, configs)), changed: [] };
 
   const writes = new Map<string, Record<string, unknown>>();
   const stage = (id: string, enabled: boolean): void => {
@@ -626,7 +629,7 @@ export const batchSetEnabled = async (home: string, enable: string[], disable: s
 
 export const bulkSetEnabled = async (home: string, enabled: boolean): Promise<BulkResponse> => {
   const { configs, entries } = await entriesOf(home);
-  const before = buildResponse(configs);
+  const before = await buildResponse(home, configs);
   const blocking = before.conflicts.filter((conflict) => conflict.blocking);
   if (blocking.length > 0) {
     throw new McpError('conflict', 409, 'Config problems remain; bulk changes are blocked', blocking);
@@ -913,7 +916,7 @@ export const importManifest = async (home: string, kind: string, value: string):
     throw new McpError('invalid-manifest', 400, `Manifest contains invalid servers: ${invalid.join(', ')}`);
   }
 
-  const current = buildResponse(await loadConfigs(home));
+  const current = await buildResponse(home, await loadConfigs(home));
   const existing = drafts.map((draft) => draft.id).filter((id) => current.servers.some((server) => server.id === id));
   return { drafts, existing, source };
 };

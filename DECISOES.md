@@ -31,7 +31,8 @@ client, execute user commands on panel render, and hit remote servers with the u
 credentials on every rescan.
 
 **Partial substitute.** `advertised` means "OpenCode will load this and its tools are not
-disabled by the `tools` section" — a static, honest prediction.
+disabled by the `tools` section" — a static, honest prediction. When a load actually failed, the
+panel shows what OpenCode itself logged (decision 20) instead of guessing.
 
 ## 3. No token estimate
 
@@ -203,4 +204,23 @@ The title carries the count (`MCP Manager - 8 / 42 enabled`), not a summary bloc
 documentation open; a form that guesses `command`/`url`/`environment` adds a failure mode
 without removing work. `POST /servers/save` still creates and renames (used by **Edit** and by
 scripts), so nothing is lost on the service side.
+
+## 20. The failure cause comes from OpenCode's log, not from a probe
+
+**Decision.** After scanning the config, the service reads the tail (4 MB) of
+`~/.local/share/opencode/log/opencode.log`, keeps the latest `mcp` event per server id, and
+reports a failure only when that last event is one: `mcp connect failed`,
+`mcp http authentication rejected` or `mcp oauth authorization failed`. `mcp transport error`
+(runtime noise: cancelled requests, tool errors) is ignored. The panel shows a disclosure only
+when a failure exists.
+
+**Why.** The user asked for "the cause when the MCP fails to load". The only source of that
+information without breaking decision 1 is the log OpenCode already writes, which contains the
+`status.error` string, HTTP status, origin and the directory of the attempt. Late-binding to a
+later `mcp connected` line means the badge disappears as soon as the server recovers, instead of
+relying on a timestamp heuristic.
+
+**Cost.** One 4 MB tail read per scan (~30 ms on a 37 MB log), read-only, no new permission.
+**Known limit.** If the log is rotated or emptied, failures vanish from the panel; the data is
+only as fresh as the file.
 

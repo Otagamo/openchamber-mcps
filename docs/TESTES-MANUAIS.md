@@ -27,6 +27,19 @@ below needs a human, a real OpenChamber, and a real OpenCode config.
       reported as invalid.
 - [ ] **Rescan** picks up an edit made in another editor without restarting OpenChamber.
 
+## Load failures
+
+- [ ] Point a local server's command at a missing binary and start a session → the row shows the
+      `failed` badge, the switch note reads "Failed to load", and **Why did it fail?** opens the
+      cause OpenCode logged (e.g. `spawn … ENOENT`).
+- [ ] A remote server with a bad `Authorization` header → disclosure shows the HTTP status and the
+      endpoint, not a stack trace.
+- [ ] Fix the cause and let it connect → after **Rescan** the badge is gone (a later
+      `mcp connected` clears it).
+- [ ] Disable a failing server → the disclosure is not shown while it is disabled.
+- [ ] A server that only produced `mcp transport error` lines (tool/cancel noise) has no badge.
+- [ ] With no log directory, every row renders exactly as before (no badge, no disclosure).
+
 ## Write path
 
 - [ ] Toggle off → `"disabled": true` appears on that one line; the rest of the file is unchanged
