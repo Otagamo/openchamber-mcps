@@ -42,29 +42,28 @@ below needs a human, a real OpenChamber, and a real OpenCode config.
 
 ## Editor
 
-- [ ] Add server, local type, command with quoted argument containing a space.
-- [ ] Add server with an invalid command (empty) → inline error, nothing written.
-- [ ] Add server with an id containing a space → rejected before the request.
+- [ ] **Edit** on a local server whose command has a quoted argument containing a space; save
+      without changes → file unchanged.
+- [ ] Empty the command → inline error, nothing written.
+- [ ] Change the id to one with a space → rejected before the request.
 - [ ] Edit a server's env: existing token field is blank with the "kept" placeholder; saving
       without touching it keeps the token in the file.
 - [ ] Remove the token row and save → the key is gone from the file.
 - [ ] Rename an id → the old key disappears, the new one appears, nothing else changes.
 - [ ] Delete a server → key removed, `.bak` holds the previous file, toast confirms.
 - [ ] Editing a server defined in `opencode.jsonc` writes back to `opencode.jsonc`.
+- [ ] There is no **Add server** button and no **Install from source** panel; the header shows
+      `MCP Manager - <enabled> / <total> enabled` and no summary lines.
 
-## Import
+## Import (service API, no panel UI)
 
-- [ ] Paste an `mcp.servers` block → drafts listed, **Add** writes them.
-- [ ] Paste a deprecated flat `mcp` block with `enabled` and a numeric `timeout` → saved as
+- [ ] `POST /servers/import` with `{"kind":"paste","value":"…"}` returns drafts and writes nothing.
+- [ ] A deprecated flat `mcp` block with `enabled` and a numeric `timeout` comes back as
       `disabled` and `{ "execution": n }`.
-- [ ] Paste a single definition with `name` → imported without the `name` field.
-- [ ] Paste a whole `opencode.json` → only the `mcp` block is used.
-- [ ] Paste a manifest with one invalid server → whole import refused with the offending id.
-- [ ] URL import of a reachable manifest works; unreachable host and non-200 both show a clear
-      sentence (no stack trace).
-- [ ] Path import of a directory with `mcp.json` works; a directory without one reports what it
-      looked for.
-- [ ] Importing an existing id lists it under "already present" and overwrites on **Add**.
+- [ ] A single definition with `name` is returned without the `name` field.
+- [ ] A whole `opencode.json` yields only its `mcp` servers.
+- [ ] A manifest with one invalid server → 400 naming the offending id.
+- [ ] URL and path kinds work; unreachable host and missing file both return a clear message.
 
 ## Conflicts
 

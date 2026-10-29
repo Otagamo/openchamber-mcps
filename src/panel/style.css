@@ -35,29 +35,30 @@
   flex-wrap: wrap;
   gap: 8px 12px;
 }
+.mc-title-block {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 2px 8px;
+  min-width: 0;
+}
 .mc-title {
   margin: 0;
   font-size: 14px;
   font-weight: 600;
   line-height: 1.4;
 }
+.mc-title-count {
+  color: var(--mc-muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
 .mc-actions {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: 6px;
-}
-.mc-summary {
-  margin: 0;
-  color: var(--mc-fg);
-  font-size: 12px;
-  line-height: 1.5;
-  overflow-wrap: anywhere;
-}
-.mc-summary-secondary {
-  margin-top: -4px;
-  color: var(--mc-muted);
-  font-size: 11px;
 }
 .mc-body {
   min-height: 0;

@@ -110,15 +110,17 @@ round-trip without inventing a placeholder that could be written back as a liter
 | `manual` (disable-model-invocation) | `tools-off` | both mean "enabled but the model cannot use it" |
 | `no-description` | `insecure-url`, `stub` | no description field exists; an `http://` remote or a deprecated entry that only carries the flag are the closest "you probably did not mean this" |
 
-## 10. Import instead of "install"
+## 10. Import exists in the service, not in the panel
 
 **Decision.** `POST /servers/import` accepts a manifest by paste, URL or local path, validates
-it, and returns drafts. It never writes; the panel saves each draft through the normal save
-path.
+it, and returns drafts; it never writes. The panel has no button for it: servers are added to
+`mcp.servers` by hand and then loaded with **Rescan**.
 
 **Why.** Skills install = drop a file, which the OS can do. MCP install = add a key to a config
-that also holds unrelated settings, so it must go through the same validated write. Accepting
-only the shapes OpenCode already defines avoids inventing a registry format.
+that also holds unrelated settings, and this panel is a manager for what is already configured,
+not a marketplace. The endpoint stays because it is the only sane way to script a bulk
+registration, and accepting only the shapes OpenCode already defines avoids inventing a
+registry format.
 
 ## 11. No preset groups
 
@@ -190,3 +192,15 @@ refused); `{"execution": 5000}` is accepted.
 **Why.** The two shapes are not equivalent — the object distinguishes startup, catalog and
 execution timeouts — and the schema rejects the number. Reporting it is more useful than
 pretending the server is fine.
+
+## 19. The panel does not create servers
+
+**Decision.** There is no **Add server** button. Creating a server means adding an entry to
+`mcp.servers` in the config; the panel then edits, toggles, groups and deletes what exists.
+The title carries the count (`MCP Manager - 8 / 42 enabled`), not a summary block.
+
+**Why.** Adding a server is a naming and transport decision made once, with the upstream
+documentation open; a form that guesses `command`/`url`/`environment` adds a failure mode
+without removing work. `POST /servers/save` still creates and renames (used by **Edit** and by
+scripts), so nothing is lost on the service side.
+

@@ -599,50 +599,6 @@ document.querySelector("#group").onclick = () => {
 document.querySelector("#edit-groups").onclick = () => {
   frame.contentDocument?.querySelector(".mc-groups-edit")?.click();
 };
-document.querySelector("#add-server").onclick = () => {
-  const doc = frame.contentDocument;
-  const button = [...(doc?.querySelectorAll("button") ?? [])].find(
-    (node) => node.textContent === "Add server",
-  );
-  if (!button) {
-    audit.textContent = "Add test failed: header button not found";
-    return;
-  }
-  button.click();
-  setTimeout(() => {
-    audit.textContent = `Editor: ${doc?.querySelector(".mc-group-editor .mc-section-title")?.textContent ?? "missing"}`;
-  }, 80);
-};
-document.querySelector("#install").onclick = () => {
-  const doc = frame.contentDocument;
-  const details = doc?.querySelector(".mc-install");
-  if (!details) {
-    audit.textContent = "Install test failed: panel not found";
-    return;
-  }
-  details.open = true;
-  const paste = doc?.querySelector('[data-field="paste"]');
-  if (!paste) {
-    audit.textContent = "Install test failed: paste field not found";
-    return;
-  }
-  paste.value = JSON.stringify({
-    mcp: {
-      "fixture-import": { type: "local", command: ["npx", "-y", "fixture-mcp"], environment: { TOKEN: "hidden" } },
-      github: { type: "remote", url: "https://api.githubcopilot.com/mcp/" },
-    },
-  });
-  paste.dispatchEvent(new Event("input", { bubbles: true }));
-  const importButton = [...(doc?.querySelectorAll(".mc-install button") ?? [])].find(
-    (node) => node.textContent === "Import",
-  );
-  importButton?.click();
-  setTimeout(() => {
-    const drafts = doc?.querySelectorAll(".mc-install-draft").length ?? 0;
-    audit.textContent = `Install preview: ${drafts} draft(s) from the pasted manifest`;
-    doc?.querySelector(".mc-install")?.scrollIntoView({ block: "start" });
-  }, 200);
-};
 document.querySelector("#reload").onclick = show;
 
 paint();

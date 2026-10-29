@@ -14,14 +14,12 @@ Current version **0.1.0**.
 
 - Toggle a server with `"disabled": true` / `false` inside `mcp.servers` — the equivalent of the
   skills rename toggle.
-- Add and edit servers from the panel: `type`, `command`, `cwd`, `environment`, `url`,
+- Edit an existing server from the panel: id, `type`, `command`, `cwd`, `environment`, `url`,
   `headers`, `enabled`, with inline validation before anything is written. `timeout`,
   `codemode`, `protocol` and `oauth` are preserved untouched.
 - Reads the current `mcp.servers` schema and still lists deprecated top-level `mcp.<id>` entries,
   writing each one back in the shape it already has.
-- Import a manifest by paste, URL or local path (`mcp.servers`, a deprecated flat `mcp` block, a
-  single definition with a `name`, or a whole `opencode.json`); every draft is validated first,
-  then saved one by one, always into `mcp.servers`.
+- The panel header keeps the running count: `MCP Manager - 8 / 42 enabled`.
 - Conflict checks: unreadable/invalid config (blocking), the same server in both
   `opencode.json` and `opencode.jsonc` or in both containers (blocking), the same key twice
   inside a container, an invalid definition, tools disabled by the `tools` section,
@@ -95,14 +93,10 @@ lifecycle — see [DECISOES.md](DECISOES.md#1-no-process-supervision-startstop-o
 
 ## Panel
 
-- Header: `<advertised> of <total> visible to the model · <enabled> enabled`, then disabled,
-  invalid, blocking conflicts and warning counts.
-- **Add server** opens the editor; each row has **Edit**, **Delete** (inline confirmation) and
-  the enabled switch.
+- Header: `MCP Manager - <enabled> / <total> enabled`.
+- Each row has **Edit**, **Delete** (inline confirmation) and the enabled switch.
 - Rows show the transport (`local` / `remote`), the command joined or the URL, plus `env`,
-  `headers` and `timeout` when present.
-- **Install from source**: paste, URL, or path; the panel lists what it found, marks ids that
-  already exist, and saves only when you press **Add**.
+  `headers`, `timeout`, `codemode`, `protocol` and the `deprecated entry` marker when present.
 - Group tabs (dropdown under 380 px) with **Edit groups**, **Enable group**, **Disable group**
   and **Only this group**.
 - Conflict card appears only when there is something to report; blocking items come first and
@@ -135,6 +129,8 @@ lifecycle — see [DECISOES.md](DECISOES.md#1-no-process-supervision-startstop-o
 ## Limits
 
 - No background watcher; press **Rescan** after the config changes elsewhere.
+- No create or import UI: servers are added by editing `mcp.servers` in the config (the service
+  still exposes `POST /servers/import` for scripted use). Then press **Rescan**.
 - Inside the `mcp` block the extension re-serialises the servers it writes: comments there are
   lost, and a hand-written single-line object is reflowed. Indentation style and line endings
   are read from the file, everything outside `mcp` keeps its bytes, and the previous file is in
@@ -186,7 +182,7 @@ npm run preview    # synthetic data on 127.0.0.1, never reads your config
 | Unit | skill entry file | `mcp.servers` entry of the OpenCode config |
 | Storage | `~/.config/opencode/skills/**` | `~/.config/opencode/opencode.json` |
 | Disable | rename to `.disabled` | `"disabled": true` |
-| Create | copy a file into the directory | edit form or manifest import |
+| Create | copy a file into the directory | none in the panel; add the key by hand |
 | Delete | none (files are never deleted) | removes the key, keeps a `.bak` |
 | Secrets | none | env/header values blanked on read |
 | Cost display | estimated tokens per step | not shown (unknown without a connection) |
