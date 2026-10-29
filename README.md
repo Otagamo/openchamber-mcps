@@ -189,6 +189,19 @@ npm run preview    # synthetic data on 127.0.0.1, never reads your config
 | States | enabled, disabled, mixed, conflict | enabled, disabled, invalid, conflict |
 | Groups | shared file, six presets | shared file, no presets |
 
+## Credits
+
+This project is based on the work of
+[**openchamber-skills**](https://github.com/chenyuhao0628/openchamber-skills) by
+[@chenyuhao0628](https://github.com/chenyuhao0628): the extension architecture (panel iframe +
+local service + shared contract), the panel layout and interaction model, the conflict/groups
+concept and most of the documentation structure come from there. What changed is the domain —
+MCP servers instead of skill files — and the write path that came with it. See
+[ANALISE_SKILLS.md](ANALISE_SKILLS.md) for the analysis this port was built from and
+[MAPEAMENTO_MCP.md](MAPEAMENTO_MCP.md) for the concept-by-concept mapping.
+
+If you want to manage OpenCode skills rather than MCP servers, use the original project.
+
 ## Docs
 
 - [ANALISE_SKILLS.md](ANALISE_SKILLS.md) — how the reference extension is built.
