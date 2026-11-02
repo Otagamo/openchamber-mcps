@@ -75,7 +75,7 @@ one of the shapes above.
 
 The MCP equivalent of the rename toggle is `disabled`. The extension writes the flag and lets
 OpenCode start or skip the process. It does not spawn, supervise, health-check or stop
-processes itself (see `DECISOES.md`, decision 1).
+processes itself (see `DECISIONS.md`, decision 1).
 
 `mixed` (some entries on, some off) has no MCP counterpart: one id has one definition per
 container. Two definitions for one id — same file's two containers, or the two config files —
@@ -100,7 +100,7 @@ re-attaches the stored value for keys left blank.
 | Process lifecycle | Owned by OpenCode. We only write config. |
 | Health check | Not performed. A failing server surfaces in OpenCode, not here; the panel reports definition validity only. |
 | Tools / resources listing | Not available without a live MCP handshake. Counts are not shown. |
-| Context cost of tools | Not estimated (see `DECISOES.md`, decision 3). |
+| Context cost of tools | Not estimated (see `DECISIONS.md`, decision 3). |
 | `tools` section globals | Detected: a pattern that disables a server's tools marks it as not visible to the model (`tools-off`). |
 | Deprecated entries | Listed and toggled in place; new or imported servers go to `mcp.servers`. |
 
@@ -124,7 +124,7 @@ Add/Edit form, the Install-from-source panel, Delete with inline confirmation.
 
 ## 4. What is intentionally *not* equivalent
 
-See `DECISOES.md` for the reasoning behind each:
+See `DECISIONS.md` for the reasoning behind each:
 
 1. No process supervision, start/stop, or health check.
 2. No tools/resources listing or token estimate.

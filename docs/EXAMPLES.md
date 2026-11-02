@@ -59,7 +59,7 @@ field is split on whitespace but respects double quotes, so
 
 ## 4. A request timeout, set by hand
 
-`timeout` is not in the form on purpose (see `DECISOES.md`, decision 16) because it is an object:
+`timeout` is not in the form on purpose (see `DECISIONS.md`, decision 16) because it is an object:
 
 ```json
 {
