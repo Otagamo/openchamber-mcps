@@ -53,9 +53,14 @@ MCP Manager puts the whole list in front of you, with a switch next to every row
 
 ## Install
 
-In OpenChamber open **Settings → Extensions → Add extension → URL**, paste this repository's URL,
-and you are done. Requires OpenChamber **2.4.0 or newer**; the extension asks for no host
-capabilities.
+In OpenChamber open **Settings → Extensions → Add extension → URL** and paste the public
+repository URL:
+
+```
+https://github.com/Otagamo/openchamber-mcps.git
+```
+
+Requires OpenChamber **2.4.0 or newer**; the extension asks for no host capabilities.
 
 Working from a checkout instead:
 
