@@ -37,19 +37,23 @@ Current version **0.1.0**.
 
 ## Screenshot
 
-<img src="docs/screenshots/panel.jpg" alt="MCP Manager panel" width="420">
+<img src="docs/screenshots/panel.png" alt="MCP Manager panel" width="420">
 
 *Synthetic preview with sample servers. No real config is read or written.*
 
-<img src="docs/screenshots/panel-failure.jpg" alt="Failure details" width="420">
+<img src="docs/screenshots/panel-failure.png" alt="Failure details" width="420">
 
 *A load failure: the badge, the disclosure and the cause OpenCode logged.*
+
+<img src="docs/screenshots/panel-groups.png" alt="Edit groups" width="420">
+
+*Group editing: name a group, pick its members, and the panel filters and bulk toggles by it.*
 
 ## Install
 
 In OpenChamber, open **Settings → Extensions → Add extension → URL** and paste this
-repository's URL. Requires OpenChamber **2.4.0 or newer**; the host fetches the prebuilt
-`panel/main.js` and `service/main.js`. The extension requests no host capabilities.
+repository's URL. Requires OpenChamber **2.4.0 or newer**. The extension requests no host
+capabilities.
 
 From a local directory (development):
 
